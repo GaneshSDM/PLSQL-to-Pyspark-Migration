@@ -1,23 +1,23 @@
 
-# Databricks DDL Migration — Oracle SQL to PySpark
+# Databricks DDL Migration - Oracle SQL/PLSQL to Databricks SQL and PySpark
 
-A toolset to accelerate migration of Oracle DDL and SQL schema definitions to PySpark/DataFrame-compatible code and Databricks workflows. This repository combines automated parsing, translation heuristics, validation, and an interactive web interface to help engineers convert Oracle DDL (CREATE TABLE, ALTER TABLE, indexes, partitions, constraints, etc.) into PySpark code and Databricks-friendly schema definitions.
+A toolset to accelerate migration of Oracle DDL and PL/SQL into Databricks SQL and PySpark workflows. This repository combines automated parsing, translation heuristics, validation, and an interactive web interface to help engineers convert Oracle DDL (CREATE TABLE, ALTER TABLE, indexes, partitions, constraints, etc.) into Databricks-friendly definitions and PySpark transformations where required.
 
 Key components:
-- ai_migration.py — AI-assisted migration engine that translates Oracle DDL to PySpark code and Databricks table creation logic.
-- simple_validator.py — Lightweight validator that checks translated PySpark schemas and flags common issues (type mismatches, missing constraints, unsupported constructs).
-- app.py and app.yaml — Minimal web interface / app wrapper for interactive migration, previewing results, and running validations.
-- requirements.txt — Python dependencies used by the project.
+- ai_migration.py - AI-assisted migration engine that translates Oracle DDL/PLSQL to Databricks SQL or PySpark with explicit limitations and feasibility notes.
+- simple_validator.py - Lightweight validator that checks translated SQL and flags common issues (type mismatches, missing constraints, unsupported constructs).
+- app.py and app.yaml - Minimal web interface / app wrapper for interactive migration, previewing results, bulk processing, and running validations.
+- requirements.txt - Python dependencies used by the project.
 
 ## Features
 
 - AI-assisted translation
-  - Uses pattern-based parsing plus AI assistance to map Oracle types, constraints, and DDL constructs to PySpark equivalents.
-  - Produces readable, idiomatic PySpark DataFrame creation code (schema definitions, casts, default handling).
+  - Uses pattern-based parsing plus AI assistance to map Oracle types, constraints, and DDL constructs to Databricks SQL, falling back to PySpark when necessary.
+  - Produces Databricks SQL (DDL/DML) with clear limitations and manual review notes.
 
 - DDL parsing and mapping
   - Parses Oracle CREATE TABLE/ALTER TABLE statements, column definitions, constraints (PK/FK/UNIQUE), and common table options.
-  - Maps Oracle data types to PySpark types (NUMBER → Decimal/Integer, VARCHAR2 → String, DATE/TIMESTAMP → TimestampType, etc.), with sensible fallbacks for unsupported types.
+  - Maps Oracle data types to Databricks SQL types (NUMBER - DECIMAL, VARCHAR2 - VARCHAR, DATE/TIMESTAMP retained), with fallbacks for unsupported types.
 
 - Constraint & index handling
   - Preserves primary keys and unique constraints as metadata / validation checks.
@@ -34,7 +34,8 @@ Key components:
   - Generates actionable messages and suggestions to fix or manually verify translations.
 
 - Interactive web UI
-  - Lightweight app (app.py) to paste or upload DDL, preview PySpark output, run validations, and download migration artifacts.
+  - Lightweight app (app.py) to paste or upload DDL/PLSQL, preview Databricks SQL/PySpark output, run validations, and download migration artifacts.
+  - Bulk upload mode for converting multiple files in one run.
   - Deployment configuration (app.yaml) included for quick hosting (example: Google App Engine / other platforms).
 
 - Extensible & scriptable
@@ -43,7 +44,7 @@ Key components:
 
 ## Why use this project
 
-- Save time translating complex Oracle DDL into PySpark and Databricks-friendly structures.
+- Save time translating complex Oracle DDL/PLSQL into Databricks SQL and PySpark-compatible structures.
 - Reduce errors from manual conversions (data type mismatches, lost constraints).
 - Provide repeatable, auditable migration artifacts for large-scale migrations.
 - Combine deterministic rules with AI assistance to handle edge cases and ambiguous constructs.
@@ -53,7 +54,7 @@ Key components:
 Prerequisites
 - Python 3.8+ (or your preferred supported version)
 - A Databricks workspace or PySpark environment for testing produced code (recommended)
-- (Optional) API keys/config for AI provider if ai_migration.py uses an external model — check the script header or configuration for details.
+- (Optional) API keys/config for AI provider if ai_migration.py uses an external model - check the script header or configuration for details.
 
 Install dependencies
 ```bash
@@ -63,7 +64,7 @@ pip install -r requirements.txt
 Quick runs (examples)
 - CLI-style usage (example pattern):
 ```bash
-python ai_migration.py --input oracle_ddl.sql --output pyspark_migration.py
+python ai_migration.py --input oracle_ddl.sql --output databricks_migration.sql
 ```
 - Run the web app locally:
 ```bash
@@ -72,35 +73,35 @@ python app.py
 ```
 - Validate a translated file:
 ```bash
-python simple_validator.py --input pyspark_migration.py
+python simple_validator.py --input databricks_migration.sql
 ```
 Note: The exact CLI flags and options are documented in the header/docstrings of each script (ai_migration.py, simple_validator.py, app.py). Use `-h` or open the scripts to see the supported arguments.
 
 ## Usage patterns & examples
 
 - Single-table migration
-  - Paste a small CREATE TABLE DDL into the web UI or run ai_migration.py with a single-file input to generate a PySpark schema and DataFrame creation code.
+  - Paste a small CREATE TABLE DDL into the web UI or run ai_migration.py with a single-file input to generate Databricks SQL or PySpark output.
 
 - Batch migration
-  - Provide a directory or list of DDL files. The toolset can be scripted to process many DDL files and produce per-table migration artifacts and a combined report from simple_validator.py.
+  - Provide a directory or list of DDL/PLSQL files. The toolset can be scripted to process many files and produce per-object migration artifacts and a combined report from simple_validator.py.
 
 - Integration into Databricks
-  - Output artifacts are ready to be used in Databricks notebooks (schema definition, col type casts, recommended write/partition commands).
+  - Output artifacts are ready to be used in Databricks notebooks (DDL/DML, UDFs, and PySpark scaffolds).
   - Consider wrapping the resulting code into a notebook cell or job that writes to Delta tables.
 
 ## Files & structure
 
-- ai_migration.py — Core migration logic. Responsible for parsing input DDL, applying mapping rules, invoking AI assistance (if configured), and rendering PySpark code.
-- simple_validator.py — Runs checks on translated schema/output and emits a report with warnings/errors/suggestions.
-- app.py — A minimal interactive application to test/present migrations and validations.
-- app.yaml — Example deployment config for hosting the web app (platform-specific).
-- requirements.txt — Python packages used by the project.
+- ai_migration.py - Core migration logic. Responsible for parsing input DDL/PLSQL, applying mapping rules, invoking AI assistance (if configured), and rendering Databricks SQL or PySpark.
+- simple_validator.py - Runs checks on translated SQL output and emits a report with warnings/errors/suggestions.
+- app.py - A minimal interactive application to test/present migrations and validations, including bulk uploads.
+- app.yaml - Example deployment config for hosting the web app (platform-specific).
+- requirements.txt - Python packages used by the project.
 
 (See docstrings and inline comments inside each script for more precise usage and configuration options.)
 
 ## Extending & customizing
 
-- Add or adjust type mappings: Modify mapping tables inside ai_migration.py to change how Oracle types map to PySpark types for your organization.
+- Add or adjust type mappings: Modify mapping tables inside ai_migration.py to change how Oracle types map to Databricks SQL or PySpark types for your organization.
 - Add project-specific validations: Extend simple_validator.py to enforce company rules (naming conventions, required auditing columns, etc.).
 - Swap or configure AI provider: If the AI-assisted flow uses an external model, add configuration to inject your own API key, model, or provider.
 

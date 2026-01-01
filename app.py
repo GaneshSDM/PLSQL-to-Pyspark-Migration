@@ -10,7 +10,7 @@ from simple_validator import SimpleValidator
 # 1. PAGE CONFIGURATION
 # -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Oracle SQL to Databricks SQL Converter",
+    page_title="Oracle PL/SQL to Databricks SQL/PySpark Converter",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -286,7 +286,7 @@ def render_header():
     st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
 
 def render_convert_page():
-    st.markdown('<div class="card"><div class="card-header">SQL to Databricks Converter</div>', unsafe_allow_html=True)
+    st.markdown('<div class="card"><div class="card-header">PL/SQL to Databricks Converter</div>', unsafe_allow_html=True)
     
     # Show current model being used
     current_model = st.session_state.model_settings["model"]
@@ -296,12 +296,20 @@ def render_convert_page():
     
     with c1:
         st.markdown("### Input Source")
-        input_type = st.radio("Select Input Method", ["Direct Input", "File Upload"], horizontal=True, label_visibility="collapsed")
+        input_type = st.radio(
+            "Select Input Method",
+            ["Direct Input", "File Upload", "Bulk Upload"],
+            horizontal=True,
+            label_visibility="collapsed"
+        )
         
         sql_input = ""
+        bulk_items = []
+        bulk_task_type = "schema"
+
         if input_type == "Direct Input":
             sql_input = st.text_area("Paste your Oracle SQL here", height=400, placeholder="-- Paste your Oracle SQL or PL/SQL code here...")
-        else:
+        elif input_type == "File Upload":
             uploaded_file = st.file_uploader("Upload .sql file", type=["sql", "txt"])
             if uploaded_file:
                 try:
@@ -319,15 +327,44 @@ def render_convert_page():
                         
                 except Exception as e:
                     st.error(f"Error reading file: {e}")
+        else:
+            bulk_task_type = st.selectbox(
+                "Bulk Task Type",
+                ["schema", "procedure", "optimize", "feasibility"],
+                index=0,
+                help="Select the type of conversion for all uploaded files."
+            )
+            uploaded_files = st.file_uploader(
+                "Upload multiple .sql files",
+                type=["sql", "txt"],
+                accept_multiple_files=True
+            )
+            if uploaded_files:
+                for f in uploaded_files:
+                    try:
+                        content = f.read().decode("utf-8")
+                        bulk_items.append({"name": f.name, "content": content})
+                    except Exception as e:
+                        st.error(f"Error reading {f.name}: {e}")
+                if bulk_items:
+                    st.success(f"Loaded {len(bulk_items)} files for bulk processing.")
+                    with st.expander("Preview Bulk Items", expanded=False):
+                        for item in bulk_items[:5]:
+                            st.markdown(f"**{item['name']}**")
+                            preview_text = item["content"][:1000] + ("..." if len(item["content"]) > 1000 else "")
+                            st.code(preview_text, language="sql")
 
     with c2:
-        st.markdown("### Output Databricks SQL")
+        st.markdown("### Output Databricks SQL / PySpark")
         
         if st.session_state.last_result:
             result_text = st.session_state.last_result
             
             sql_code = ""
             changes_text = "No specific changes noted."
+            limitations_text = "No limitations noted."
+            feasibility_text = ""
+            code_language = "sql"
 
             # Clean artifacts if present (e.g. reasoning traces)
             if isinstance(result_text, str):
@@ -353,135 +390,170 @@ def render_convert_page():
                 # Fix literal escaped newlines
                 result_text = result_text.replace('\\n', '\n').strip()
 
-                # Extract SQL Code
-                import re
-                sql_match = re.search(r"```sql(.*?)```", result_text, re.DOTALL)
-                if sql_match:
-                    sql_code = sql_match.group(1).strip()
-                else:
-                    # Fallback
-                    split_match = re.split(r"### Changes and Enhancements", result_text)
-                    sql_code = split_match[0].strip()
-
-                # Extract Changes
-                changes_match = re.search(r"### Changes and Enhancements(.*)", result_text, re.DOTALL)
-                if changes_match:
-                    changes_text = changes_match.group(1).strip()
-
-                # Display in Tabs
-                tabs = ["Converted SQL", "Changes & Enhancements"]
-                
-                # Add validation tab if validation was performed
-                if st.session_state.get('validation_results'):
-                    tabs.append("Validation Results")
-                if st.session_state.get('test_cases'):
-                    tabs.append("Test Cases")
-                
-                tab_objects = st.tabs(tabs)
-                
-                with tab_objects[0]:  # Converted SQL tab
-                    # --- MODIFICATION: Use st.code which provides a native copy button for older versions ---
-                    st.markdown("##### Converted Code ")
-                    st.code(
-                        sql_code, 
-                        language="sql",
-                        line_numbers=True # Useful for large code blocks
-                    )
-                    
-                    # Add Download button below the code block
-                    # Keep the Download button separate as it's the only one needed here
+                is_bulk = input_type == "Bulk Upload"
+                if is_bulk:
+                    st.markdown("##### Bulk Results")
+                    st.markdown(result_text)
                     st.download_button(
-                        "Download SQL Code", 
-                        sql_code, 
-                        file_name="converted.sql",
+                        "Download Bulk Results",
+                        result_text,
+                        file_name="bulk_results.md",
                         use_container_width=True,
-                        type="secondary" 
+                        type="secondary"
                     )
-                    # Removed the separate copy button columns/logic entirely since st.code handles it
+                else:
+                    # Extract SQL or PySpark Code
+                    import re
+                    code_match = re.search(r"```(sql|python)(.*?)```", result_text, re.DOTALL)
+                    if code_match:
+                        code_language = code_match.group(1).strip()
+                        sql_code = code_match.group(2).strip()
+                    else:
+                        # Fallback
+                        split_match = re.split(r"### Changes and Enhancements", result_text)
+                        sql_code = split_match[0].strip()
 
-                
-                with tab_objects[1]:  # Changes & Enhancements tab
-                    st.markdown(changes_text)
-                
-                # Validation Results tab
-                if len(tab_objects) > 2 and st.session_state.get('validation_results'):
-                    with tab_objects[2]:
-                        st.markdown("##### Validation Summary")
-                        
-                        validation_results = st.session_state.validation_results
-                        overall_score = validation_results.get('overall_score', 0)
-                        
-                        # Display validation summary
-                        summary = st.session_state.validator.get_validation_summary(validation_results)
-                        st.markdown(f"**{summary}**")
-                        
-                        # Display detailed scores in columns
-                        scores = validation_results.get('scores', {})
-                        col1, col2, col3, col4, col5 = st.columns(5)
-                        
-                        with col1:
-                            st.metric("Syntax", f"{scores.get('syntax_score', 0):.0f}/100")
-                        with col2:
-                            st.metric("Oracle", f"{scores.get('oracle_score', 0):.0f}/100")
-                        with col3:
-                            st.metric("Databricks", f"{scores.get('databricks_score', 0):.0f}/100")
-                        with col4:
-                            st.metric("Performance", f"{scores.get('performance_score', 0):.0f}/100")
-                        with col5:
-                            st.metric("Schema", f"{scores.get('schema_score', 0):.0f}/100")
-                        
-                        # Display critical issues first
-                        critical_issues = validation_results.get('critical_issues', [])
-                        if critical_issues:
-                            st.markdown("**🚨 Critical Issues:**")
-                            for issue in critical_issues:
-                                st.error(f"• {issue}")
-                        
-                        # Display regular issues
-                        issues = validation_results.get('issues', [])
-                        non_critical = [i for i in issues if i not in critical_issues]
-                        if non_critical:
-                            st.markdown("**⚠️ Issues Found:**")
-                            for issue in non_critical[:10]:  # Limit to 10 for UI
-                                st.warning(f"• {issue}")
-                            if len(non_critical) > 10:
-                                st.info(f"... and {len(non_critical) - 10} more issues")
-                        
-                        # Display recommendations
-                        recommendations = validation_results.get('recommendations', [])
-                        if recommendations:
-                            st.markdown("**💡 Recommendations:**")
-                            for rec in recommendations[:5]:  # Limit to 5
-                                st.info(f"• {rec}")
-                        
-                        # Show auto-fixable issues
-                        auto_fixable = validation_results.get('auto_fixable', [])
-                        if auto_fixable:
-                            st.markdown("**🔧 Auto-Fixable Issues:**")
-                            for fix in auto_fixable[:5]:
-                                st.success(f"• {fix}")
-                        
-                        if not issues and not critical_issues:
-                            st.success("✅ No issues found - Migration is excellent!")
-                
-                # Test Cases tab
-                if len(tab_objects) > 3 and st.session_state.get('test_cases'):
-                    with tab_objects[3]:
-                        st.markdown("##### Generated Test Cases")
-                        test_cases_text = '\n'.join(st.session_state.test_cases)
-                        st.code(test_cases_text, language="sql")
-                        
+                    # Extract Changes
+                    changes_match = re.search(r"### Changes and Enhancements(.*?)(?=\\n### |\\Z)", result_text, re.DOTALL)
+                    if changes_match:
+                        changes_text = changes_match.group(1).strip()
+
+                    # Extract Limitations
+                    limitations_match = re.search(
+                        r"### Limitations and Manual Review(.*?)(?=\\n### |\\Z)",
+                        result_text,
+                        re.DOTALL
+                    )
+                    if limitations_match:
+                        limitations_text = limitations_match.group(1).strip()
+                    else:
+                        limitations_match = re.search(
+                            r"### Limitations and Assumptions(.*?)(?=\\n### |\\Z)",
+                            result_text,
+                            re.DOTALL
+                        )
+                        if limitations_match:
+                            limitations_text = limitations_match.group(1).strip()
+
+                    # Extract Automation Feasibility
+                    feasibility_match = re.search(r"### Automation Feasibility(.*?)(?=\\n### |\\Z)", result_text, re.DOTALL)
+                    if feasibility_match:
+                        feasibility_text = feasibility_match.group(1).strip()
+
+                    # Display in Tabs
+                    tabs = ["Converted Code", "Changes & Enhancements", "Limitations & Review"]
+                    if feasibility_text:
+                        tabs.append("Automation Feasibility")
+
+                    # Add validation tab if validation was performed
+                    if st.session_state.get('validation_results'):
+                        tabs.append("Validation Results")
+                    if st.session_state.get('test_cases'):
+                        tabs.append("Test Cases")
+
+                    tab_objects = st.tabs(tabs)
+
+                    with tab_objects[0]:  # Converted Code tab
+                        st.markdown("##### Converted Code ")
+                        st.code(
+                            sql_code,
+                            language=code_language,
+                            line_numbers=True
+                        )
+
                         st.download_button(
-                            "Download Test Cases", 
-                            test_cases_text, 
-                            file_name="test_cases.sql",
+                            "Download Code",
+                            sql_code,
+                            file_name=f"converted.{ 'py' if code_language == 'python' else 'sql' }",
                             use_container_width=True,
                             type="secondary"
                         )
+
+                    with tab_objects[1]:  # Changes & Enhancements tab
+                        st.markdown(changes_text)
+
+                    with tab_objects[2]:  # Limitations & Review tab
+                        st.markdown(limitations_text)
+
+                    if feasibility_text:
+                        with tab_objects[3]:
+                            st.markdown(feasibility_text)
+
+                    # Validation Results tab
+                    validation_index = 2 + (1 if feasibility_text else 0)
+                    if len(tab_objects) > validation_index and st.session_state.get('validation_results'):
+                        with tab_objects[validation_index]:
+                            st.markdown("##### Validation Summary")
+
+                            validation_results = st.session_state.validation_results
+                            overall_score = validation_results.get('overall_score', 0)
+
+                            summary = st.session_state.validator.get_validation_summary(validation_results)
+                            st.markdown(f"**{summary}**")
+
+                            scores = validation_results.get('scores', {})
+                            col1, col2, col3, col4, col5 = st.columns(5)
+
+                            with col1:
+                                st.metric("Syntax", f"{scores.get('syntax_score', 0):.0f}/100")
+                            with col2:
+                                st.metric("Oracle", f"{scores.get('oracle_score', 0):.0f}/100")
+                            with col3:
+                                st.metric("Databricks", f"{scores.get('databricks_score', 0):.0f}/100")
+                            with col4:
+                                st.metric("Performance", f"{scores.get('performance_score', 0):.0f}/100")
+                            with col5:
+                                st.metric("Schema", f"{scores.get('schema_score', 0):.0f}/100")
+
+                            critical_issues = validation_results.get('critical_issues', [])
+                            if critical_issues:
+                                st.markdown("**Critical Issues:**")
+                                for issue in critical_issues:
+                                    st.error(f"- {issue}")
+
+                            issues = validation_results.get('issues', [])
+                            non_critical = [i for i in issues if i not in critical_issues]
+                            if non_critical:
+                                st.markdown("**Issues Found:**")
+                                for issue in non_critical[:10]:
+                                    st.warning(f"- {issue}")
+                                if len(non_critical) > 10:
+                                    st.info(f"... and {len(non_critical) - 10} more issues")
+
+                            recommendations = validation_results.get('recommendations', [])
+                            if recommendations:
+                                st.markdown("**Recommendations:**")
+                                for rec in recommendations[:5]:
+                                    st.info(f"- {rec}")
+
+                            auto_fixable = validation_results.get('auto_fixable', [])
+                            if auto_fixable:
+                                st.markdown("**Auto-Fixable Issues:**")
+                                for fix in auto_fixable[:5]:
+                                    st.success(f"- {fix}")
+
+                            if not issues and not critical_issues:
+                                st.success("No issues found - migration is excellent.")
+
+                    # Test Cases tab
+                    test_case_index = 3 + (1 if feasibility_text else 0)
+                    if len(tab_objects) > test_case_index and st.session_state.get('test_cases'):
+                        with tab_objects[test_case_index]:
+                            st.markdown("##### Generated Test Cases")
+                            test_cases_text = '\n'.join(st.session_state.test_cases)
+                            st.code(test_cases_text, language="sql")
+
+                            st.download_button(
+                                "Download Test Cases",
+                                test_cases_text,
+                                file_name="test_cases.sql",
+                                use_container_width=True,
+                                type="secondary"
+                            )
         else:
             st.markdown("""
             <div style="height: 400px; border: 2px dashed #e5e7eb; border-radius: 0.5rem; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #9ca3af; background-color: #f9fafb;">
-                <div style="font-size: 3rem; margin-bottom: 1rem;">⚡</div>
+                <div style="font-size: 3rem; margin-bottom: 1rem;">ALERT</div>
                 <div>AI-Powered Conversion Ready</div>
             </div>
             """, unsafe_allow_html=True)
@@ -498,30 +570,56 @@ def render_convert_page():
     # -------------------------------------------------------------------------
     with ac1:
         if st.button(" Convert to Databricks SQL", use_container_width=True):
-            if not sql_input.strip():
-                st.error("Please provide SQL input.")
-            else:
-                with st.spinner("Analyzing and Converting..."):
-                    try:
-                        temp = st.session_state.model_settings["temperature"]
-                        tokens = st.session_state.model_settings["max_tokens"]
-                        
-                        # Use standard migration with simple validation
-                        result = st.session_state.migration_ai.migrate_schema(
-                            sql_input, 
-                            temperature=temp, 
-                            max_tokens=tokens
-                        )
-                        
-                        if isinstance(result, list):
-                            result = "\n".join(map(str, result))
-                        elif not isinstance(result, str):
-                            result = str(result)
+            if input_type == "Bulk Upload":
+                if not bulk_items:
+                    st.error("Please upload at least one file for bulk processing.")
+                else:
+                    with st.spinner("Analyzing and Converting (Bulk)..."):
+                        try:
+                            temp = st.session_state.model_settings["temperature"]
+                            tokens = st.session_state.model_settings["max_tokens"]
+                            
+                            result = st.session_state.migration_ai.migrate_bulk(
+                                bulk_items,
+                                task_type=bulk_task_type,
+                                temperature=temp,
+                                max_tokens=tokens
+                            )
+                            
+                            if isinstance(result, list):
+                                result = "\n".join(map(str, result))
+                            elif not isinstance(result, str):
+                                result = str(result)
 
-                        st.session_state.last_result = result
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Error: {e}")
+                            st.session_state.last_result = result
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+            else:
+                if not sql_input.strip():
+                    st.error("Please provide SQL input.")
+                else:
+                    with st.spinner("Analyzing and Converting..."):
+                        try:
+                            temp = st.session_state.model_settings["temperature"]
+                            tokens = st.session_state.model_settings["max_tokens"]
+                            
+                            # Use standard migration with simple validation
+                            result = st.session_state.migration_ai.migrate_schema(
+                                sql_input, 
+                                temperature=temp, 
+                                max_tokens=tokens
+                            )
+                            
+                            if isinstance(result, list):
+                                result = "\n".join(map(str, result))
+                            elif not isinstance(result, str):
+                                result = str(result)
+
+                            st.session_state.last_result = result
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error: {e}")
         
 
     # -------------------------------------------------------------------------
@@ -608,7 +706,7 @@ def render_settings_page():
     st.markdown('</div>', unsafe_allow_html=True)
 
 def render_support_page():
-    st.markdown('<div class="card"><div class="card-header">📞 Enterprise Support</div>', unsafe_allow_html=True)
+    st.markdown('<div class="card"><div class="card-header">PHONE Enterprise Support</div>', unsafe_allow_html=True)
     
     c1, c2 = st.columns([1, 1])
     with c1:
@@ -643,7 +741,7 @@ def main():
         
     st.markdown("""
     <div class="footer">
-        © 2025 Decision Minds | Powered by Databricks Accelerator<br>
+        (c) 2025 Decision Minds | Powered by Databricks Accelerator<br>
         Version 2.0.0 Enterprise Edition
     </div>
     """, unsafe_allow_html=True)
