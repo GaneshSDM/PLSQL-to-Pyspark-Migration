@@ -1,5 +1,5 @@
 
-# Databricks DDL Migration - Oracle SQL/PLSQL to Databricks SQL and PySpark
+# Oracle SQL/PLSQL to Databricks SQL and PySpark
 
 A toolset to accelerate migration of Oracle DDL and PL/SQL into Databricks SQL and PySpark workflows. This repository combines automated parsing, translation heuristics, validation, and an interactive web interface to help engineers convert Oracle DDL (CREATE TABLE, ALTER TABLE, indexes, partitions, constraints, etc.) into Databricks-friendly definitions and PySpark transformations where required.
 
