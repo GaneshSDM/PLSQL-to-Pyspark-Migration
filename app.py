@@ -23,24 +23,37 @@ SUPPORTED_DIALECTS = [
 ]
 
 SUPPORTED_MODELS = [
-    "Claude", "GPT", "Llama", "Gemma", "Databricks GPT", "Other"
+    "Databricks GPT-5.2", "Databricks GPT-5.1", "Databricks GPT OSS 120B", "Databricks GPT OSS 20B",
+    "Databricks Qwen3 80B", "Databricks Llama 4 Maverick", "Databricks Gemma 3 12B",
+    "Databricks Llama 3.1 8B", "Databricks Llama 3.3 70B", "Claude", "GPT", "Llama", "Gemma", "Other"
 ]
 
 # Model endpoints mapping
 MODEL_ENDPOINTS = {
-    "Databricks GPT": "https://dbc-e8fae528-2bde.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
+    "Databricks GPT-5.2": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-5-2/invocations",
+    "Databricks GPT-5.1": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-5-1/invocations",
+    "Databricks GPT OSS 120B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
+    "Databricks GPT OSS 20B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-20b/invocations",
+    "Databricks Qwen3 80B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-qwen3-next-80b-a3b-instruct/invocations",
+    "Databricks Llama 4 Maverick": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-llama-4-maverick/invocations",
+    "Databricks Gemma 3 12B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gemma-3-12b/invocations",
+    "Databricks Llama 3.1 8B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-meta-llama-3-1-8b-instruct/invocations",
+    "Databricks Llama 3.3 70B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-meta-llama-3-3-70b-instruct/invocations",
     # Add other model endpoints as needed
 }
 
 # Initialize session state
 if "migration_ai" not in st.session_state:
+    # Get API key from environment or use placeholder
+    default_api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY") or "your-databricks-token-here"
+
     # Default model configuration
     st.session_state.model_settings = {
-        "model": "Databricks GPT",
-        "endpoint": "https://dbc-e8fae528-2bde.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
+        "model": "Databricks GPT OSS 120B",
+        "endpoint": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
         "temperature": 0.1,
         "max_tokens": 4096,
-        "api_key": "dapi31a4d352082f4e740f88e86cbee1bf1f"
+        "api_key": default_api_key
     }
     st.session_state.migration_ai = MigrationAI(api_key=st.session_state.model_settings["api_key"])
     st.session_state.validator = SimpleValidator()
@@ -352,7 +365,8 @@ def render_header():
                 "Bulk Task Type",
                 ["schema", "procedure", "optimize", "feasibility"],
                 index=0,
-                help="Select the type of conversion for all uploaded files."
+                help="Select the type of conversion for all uploaded files.",
+                key="bulk_task_type"
             )
             uploaded_files = st.file_uploader(
                 "Upload multiple .sql files",
@@ -686,7 +700,19 @@ def render_finetuning_page():
 
 def render_settings_page():
     st.markdown('<div class="card"><div class="card-header"> System Configuration</div>', unsafe_allow_html=True)
-    
+
+    # API Key Configuration
+    st.markdown("### 🔑 API Configuration")
+    api_key = st.text_input("Databricks API Token",
+                           value=st.session_state.model_settings["api_key"],
+                           type="password",
+                           help="Enter your Databricks Personal Access Token. You can get this from your Databricks workspace under User Settings > Developer > Access tokens.")
+
+    if api_key != st.session_state.model_settings["api_key"]:
+        st.session_state.model_settings["api_key"] = api_key
+        st.session_state.migration_ai = MigrationAI(api_key=api_key)
+        st.success("API key updated successfully!")
+
     # Model endpoints mapping
     model_endpoints = {
         "databricks-meta-llama-3-1-405b-instruct": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
@@ -705,7 +731,7 @@ def render_settings_page():
         model_list = list(model_endpoints.keys())
         current_index = model_list.index(current_model) if current_model in model_list else 0
         
-        model = st.selectbox("AI Model", model_list, index=current_index)
+        model = st.selectbox("AI Model", model_list, index=current_index, key="ai_model_select")
         temp = st.slider("Creativity (Temperature)", 0.0, 1.0, st.session_state.model_settings["temperature"])
 
     with c2:
@@ -858,9 +884,9 @@ def render_interactive_conversion():
     # Model and dialect selection
     col1, col2, col3 = st.columns(3)
     with col1:
-        selected_model = st.selectbox("LLM Model", SUPPORTED_MODELS, index=SUPPORTED_MODELS.index("Databricks GPT"))
+        selected_model = st.selectbox("LLM Model", SUPPORTED_MODELS, index=SUPPORTED_MODELS.index("Databricks GPT OSS 120B"), key="interactive_model")
     with col2:
-        selected_dialect = st.selectbox("Source Dialect", SUPPORTED_DIALECTS, index=SUPPORTED_DIALECTS.index("Oracle"))
+        selected_dialect = st.selectbox("Source Dialect", SUPPORTED_DIALECTS, index=SUPPORTED_DIALECTS.index("Oracle"), key="interactive_dialect")
     with col3:
         enable_validation = st.checkbox("Enable EXPLAIN Validation", value=True)
 
@@ -925,9 +951,9 @@ def render_batch_jobs():
         results_table = st.text_input("Results Table", placeholder="main.migration.batch_results")
 
     with col2:
-        batch_dialect = st.selectbox("Source Dialect", SUPPORTED_DIALECTS, index=SUPPORTED_DIALECTS.index("Oracle"))
+        batch_dialect = st.selectbox("Source Dialect", SUPPORTED_DIALECTS, index=SUPPORTED_DIALECTS.index("Oracle"), key="batch_dialect")
         validation_strategy = st.selectbox("Validation Strategy",
-                                         ["No validation", "Validate by running EXPLAIN", "Failed queries can be retried"])
+                                         ["No validation", "Validate by running EXPLAIN", "Failed queries can be retried"], key="batch_validation")
         max_retries = st.slider("Max Retries", 0, 5, 2)
 
     # Start batch job
@@ -1007,7 +1033,7 @@ def main():
     """, unsafe_allow_html=True)
 
     # Create tabs
-    tab1, tab2, tab3 = st.tabs(["🔹 Interactive Conversion", "🔹 Batch Jobs", "🔹 Reconcile Tables"])
+    tab1, tab2, tab3, tab4 = st.tabs(["🔹 Interactive Conversion", "🔹 Batch Jobs", "🔹 Reconcile Tables", "⚙️ Settings"])
 
     with tab1:
         render_interactive_conversion()
@@ -1017,6 +1043,9 @@ def main():
 
     with tab3:
         render_reconcile_tables()
+
+    with tab4:
+        render_settings_page()
 
     st.markdown("""
     <div style="text-align: center; margin-top: 3rem; padding: 1rem; border-top: 1px solid #e0e0e0;">

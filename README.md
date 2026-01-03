@@ -50,7 +50,7 @@ streamlit run app.py
 ## 🔧 Configuration
 
 ### LLM Models
-Select from Claude, GPT, Llama, Gemma, Databricks GPT, etc.
+Select from Databricks GPT-5.2, GPT-5.1, GPT OSS 120B, Qwen3 80B, Llama models, Gemma, Claude, GPT, etc.
 
 ### Custom Prompts
 (Optional) Add dialect-specific hints for complex conversions.
@@ -117,11 +117,19 @@ Both Interactive and Batch modes have built-in retry support:
 - Delta Lake
 
 ### LLM Models
+- Databricks GPT-5.2
+- Databricks GPT-5.1
+- Databricks GPT OSS 120B (default)
+- Databricks GPT OSS 20B
+- Databricks Qwen3 80B
+- Databricks Llama 4 Maverick
+- Databricks Gemma 3 12B
+- Databricks Llama 3.1 8B
+- Databricks Llama 3.3 70B
 - Claude (Anthropic)
 - GPT (OpenAI)
 - Llama (Meta)
 - Gemma (Google)
-- Databricks GPT
 - Custom endpoints
 
 ## 🔒 Security & Configuration
@@ -130,17 +138,23 @@ Both Interactive and Batch modes have built-in retry support:
 Set these in your Databricks secrets or environment:
 
 ```bash
-DATABRICKS_ENDPOINT=https://your-workspace.cloud.databricks.com/serving-endpoints/your-endpoint/invocations
-DATABRICKS_TOKEN=your-databricks-token
+DATABRICKS_TOKEN=your-databricks-personal-access-token
+# or
+DATABRICKS_API_KEY=your-databricks-personal-access-token
 ```
 
-### Secrets Scope (Recommended)
-Create a Databricks secrets scope for secure credential management:
+### API Key Configuration
+You can also configure your API key directly in the app:
+1. Open the **Settings** tab (⚙️)
+2. Enter your Databricks Personal Access Token
+3. The token will be saved for the session
 
-```python
-# In Databricks
-dbutils.secrets.get(scope="migration", key="api_key")
-```
+To get your Databricks Personal Access Token:
+1. Go to your Databricks workspace
+2. Click on your username (top right)
+3. Select "User Settings"
+4. Go to "Developer" → "Access tokens"
+5. Generate a new token
 
 ## 📈 Performance & Best Practices
 
