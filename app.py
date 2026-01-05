@@ -22,12 +22,6 @@ SUPPORTED_DIALECTS = [
     "MySQL", "PostgreSQL", "SSIS", "Informatica", "Other"
 ]
 
-SUPPORTED_MODELS = [
-    "Databricks GPT-5.2", "Databricks GPT-5.1", "Databricks GPT OSS 120B", "Databricks GPT OSS 20B",
-    "Databricks Qwen3 80B", "Databricks Llama 4 Maverick", "Databricks Gemma 3 12B",
-    "Databricks Llama 3.1 8B", "Databricks Llama 3.3 70B", "Claude", "GPT", "Llama", "Gemma", "Other"
-]
-
 # Model endpoints mapping
 MODEL_ENDPOINTS = {
     "Databricks GPT-5.2": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-5-2/invocations",
@@ -41,6 +35,10 @@ MODEL_ENDPOINTS = {
     "Databricks Llama 3.3 70B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-meta-llama-3-3-70b-instruct/invocations",
     # Add other model endpoints as needed
 }
+
+# Models selectable in the UI.
+# Keep this aligned with MODEL_ENDPOINTS to avoid silently reusing a previous endpoint.
+SUPPORTED_MODELS = list(MODEL_ENDPOINTS.keys()) + ["Other (custom endpoint)"]
 
 # Initialize session state
 if "migration_ai" not in st.session_state:
@@ -925,11 +923,29 @@ def render_interactive_conversion():
     # Model and dialect selection
     col1, col2, col3 = st.columns(3)
     with col1:
-        selected_model = st.selectbox("LLM Model", SUPPORTED_MODELS, index=SUPPORTED_MODELS.index("Databricks Llama 3.1 8B"), key="interactive_model")
+        default_model = "Databricks Llama 3.1 8B"
+        default_index = SUPPORTED_MODELS.index(default_model) if default_model in SUPPORTED_MODELS else 0
+        selected_model = st.selectbox("LLM Model", SUPPORTED_MODELS, index=default_index, key="interactive_model")
     with col2:
         selected_dialect = st.selectbox("Source Dialect", SUPPORTED_DIALECTS, index=SUPPORTED_DIALECTS.index("Oracle"), key="interactive_dialect")
     with col3:
         enable_validation = st.checkbox("Enable EXPLAIN Validation", value=True)
+
+    custom_model_name = None
+    custom_endpoint = None
+    if selected_model == "Other (custom endpoint)":
+        st.markdown("#### Custom endpoint")
+        custom_model_name = st.text_input(
+            "Custom model name (display)",
+            value=st.session_state.model_settings.get("model", "custom-model"),
+            key="interactive_custom_model_name",
+        )
+        custom_endpoint = st.text_input(
+            "Custom Databricks serving endpoint URL",
+            value=st.session_state.model_settings.get("endpoint", ""),
+            help="Must be a Databricks Serving Endpoint invocations URL.",
+            key="interactive_custom_endpoint",
+        )
 
     # Custom prompt instructions
     custom_prompt = st.text_area("Custom Prompt Instructions (Optional)",
@@ -945,9 +961,19 @@ def render_interactive_conversion():
         if input_sql.strip():
             with st.spinner("Converting query..."):
                 # Update model settings
-                if selected_model in MODEL_ENDPOINTS:
+                if selected_model == "Other (custom endpoint)":
+                    if not (custom_model_name and custom_model_name.strip() and custom_endpoint and custom_endpoint.strip()):
+                        st.error("Please provide both a custom model name and a custom endpoint URL.")
+                        st.stop()
+                    st.session_state.model_settings["endpoint"] = custom_endpoint.strip()
+                    st.session_state.model_settings["model"] = custom_model_name.strip()
+                elif selected_model in MODEL_ENDPOINTS:
                     st.session_state.model_settings["endpoint"] = MODEL_ENDPOINTS[selected_model]
                     st.session_state.model_settings["model"] = selected_model
+                else:
+                    # Safety net: never proceed with a stale endpoint when the selection is unconfigured.
+                    st.error(f"Selected model '{selected_model}' is not configured with an endpoint. Please choose a supported model.")
+                    st.stop()
 
                 # Perform conversion
                 result = convert_query(input_sql, selected_dialect.lower(), custom_prompt, enable_validation)
