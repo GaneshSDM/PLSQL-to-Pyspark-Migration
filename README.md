@@ -117,15 +117,15 @@ Both Interactive and Batch modes have built-in retry support:
 - Delta Lake
 
 ### LLM Models
-- Databricks GPT-5.2
-- Databricks GPT-5.1
-- Databricks GPT OSS 120B (default)
-- Databricks GPT OSS 20B
-- Databricks Qwen3 80B
-- Databricks Llama 4 Maverick
-- Databricks Gemma 3 12B
-- Databricks Llama 3.1 8B
-- Databricks Llama 3.3 70B
+- **✅ Databricks Llama 3.1 8B** (default - recommended)
+- **✅ Databricks Qwen3 80B**
+- **✅ Databricks Llama 4 Maverick**
+- **✅ Databricks Gemma 3 12B**
+- **✅ Databricks Llama 3.3 70B**
+- **✅ Databricks GPT OSS 120B** (now working!)
+- **❌ Databricks GPT-5.2** (requires additional permissions)
+- **❌ Databricks GPT-5.1** (requires additional permissions)
+- **❌ Databricks GPT OSS 20B** (requires additional permissions)
 - Claude (Anthropic)
 - GPT (OpenAI)
 - Llama (Meta)
@@ -154,7 +154,13 @@ To get your Databricks Personal Access Token:
 2. Click on your username (top right)
 3. Select "User Settings"
 4. Go to "Developer" → "Access tokens"
-5. Generate a new token
+5. Generate a new token with appropriate permissions
+
+**Permissions needed:**
+- CAN USE permission on the serving endpoint
+- CAN ATTACH TO permission on the cluster (if applicable)
+
+**Note:** Some GPT-based endpoints may require additional workspace permissions. If you encounter 403 errors, try the Llama or Qwen models which have broader access.
 
 ## 📈 Performance & Best Practices
 

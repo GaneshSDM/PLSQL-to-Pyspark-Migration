@@ -23,40 +23,125 @@ class MigrationAI:
         api_url = settings["endpoint"]
         temperature = settings["temperature"]
         max_tokens = settings["max_tokens"]
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+
+        # Try different authentication methods for Databricks endpoints
+        auth_methods = [
+            {"Authorization": f"Bearer {self.api_key}"},  # Standard Bearer token
+            {"Authentication": f"Bearer {self.api_key}"},  # Alternative header name
+            {"Authorization": f"Token {self.api_key}"},    # Token auth
+        ]
+
+        headers_base = {"Content-Type": "application/json"}
 
         payload = {
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             "temperature": temperature
         }
+
         retries = 3
         for attempt in range(retries):
+            for auth_idx, auth_header in enumerate(auth_methods):
+                try:
+                    headers = {**headers_base, **auth_header}
+                    logger.info(f"Sending request to {settings['model']} (Attempt {attempt + 1}/{retries}, Auth method {auth_idx + 1})...")
+                    logger.info(f"Endpoint: {api_url}")
+
+                    response = requests.post(api_url, json=payload, headers=headers, timeout=30)
+                    response.raise_for_status()
+
+                    data = response.json()
+                    raw_content = data["choices"][0]["message"]["content"]
+
+                    # Handle new format where content is a list
+                    if isinstance(raw_content, list):
+                        text_content = ""
+                        for item in raw_content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                text_content += item.get("text", "")
+                        return self._clean_model_output(text_content)
+                    else:
+                        return self._clean_model_output(raw_content)
+
+                except requests.exceptions.HTTPError as e:
+                    if response.status_code == 401:
+                        logger.warning(f"Auth method {auth_idx + 1} failed with 401: {auth_header}")
+                        if auth_idx == len(auth_methods) - 1:  # Last auth method
+                            continue  # Try next attempt
+                        else:
+                            continue  # Try next auth method
+                    elif response.status_code == 403:
+                        logger.warning(f"Auth method {auth_idx + 1} failed with 403 (Forbidden): {auth_header}")
+                        if auth_idx == len(auth_methods) - 1:
+                            continue
+                        else:
+                            continue
+                    else:
+                        logger.error(f"HTTP {response.status_code} error: {response.text}")
+                        if attempt == retries - 1:
+                            return f"HTTP {response.status_code} Error: {response.text}"
+                        break  # Don't try other auth methods for non-auth errors
+
+                except Exception as e:
+                    logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                    if attempt == retries - 1:
+                        return f"Error after {retries} attempts: {str(e)}"
+                    break  # Don't retry for non-HTTP errors
+
+            time.sleep(2 ** attempt)  # Exponential backoff between attempts
+
+    def test_connection(self, endpoint_url=None, api_key=None):
+        """Test the connection to a Databricks serving endpoint"""
+        if endpoint_url is None:
+            endpoint_url = st.session_state.model_settings["endpoint"]
+        if api_key is None:
+            api_key = self.api_key
+
+        test_prompt = "Hello, please respond with 'Connection successful' if you can read this message."
+
+        # Try different authentication methods
+        auth_methods = [
+            {"Authorization": f"Bearer {api_key}"},
+            {"Authentication": f"Bearer {api_key}"},
+            {"Authorization": f"Token {api_key}"},
+        ]
+
+        headers_base = {"Content-Type": "application/json"}
+        payload = {
+            "messages": [{"role": "user", "content": test_prompt}],
+            "max_tokens": 50,
+            "temperature": 0.1
+        }
+
+        for auth_idx, auth_header in enumerate(auth_methods):
             try:
-                logger.info(f"Sending request to {settings['model']} (Attempt {attempt + 1}/{retries})...")
-                response = requests.post(api_url, json=payload, headers=headers)
+                headers = {**headers_base, **auth_header}
+                logger.info(f"Testing connection with auth method {auth_idx + 1}: {list(auth_header.keys())[0]}")
+
+                response = requests.post(endpoint_url, json=payload, headers=headers, timeout=10)
                 response.raise_for_status()
+
                 data = response.json()
-                raw_content = data["choices"][0]["message"]["content"]
-                
-                # Handle new format where content is a list
-                if isinstance(raw_content, list):
-                    text_content = ""
-                    for item in raw_content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            text_content += item.get("text", "")
-                    return self._clean_model_output(text_content)
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+                if "successful" in content.lower():
+                    return True, f"✅ Connection successful with auth method {auth_idx + 1}"
                 else:
-                    return self._clean_model_output(raw_content)
+                    return True, f"✅ Endpoint responded, but unexpected response: {content[:100]}..."
+
+            except requests.exceptions.HTTPError as e:
+                if response.status_code == 401:
+                    continue  # Try next auth method
+                elif response.status_code == 403:
+                    return False, f"❌ 403 Forbidden: Check if your API token has access to this endpoint"
+                else:
+                    return False, f"❌ HTTP {response.status_code}: {response.text[:200]}"
+            except requests.exceptions.Timeout:
+                return False, "❌ Connection timeout: Endpoint may be unavailable"
             except Exception as e:
-                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-                if attempt == retries - 1:
-                    return f"Error after {retries} attempts: {str(e)}"
-                time.sleep(2 ** attempt)  # Exponential backoff
+                return False, f"❌ Connection error: {str(e)}"
+
+        return False, "❌ All authentication methods failed. Check your API token and endpoint URL."
 
     def _clean_model_output(self, content):
         """Parses and cleans the model output if it contains structured reasoning traces."""

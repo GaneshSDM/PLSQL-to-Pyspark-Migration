@@ -44,13 +44,13 @@ MODEL_ENDPOINTS = {
 
 # Initialize session state
 if "migration_ai" not in st.session_state:
-    # Get API key from environment or use placeholder
-    default_api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY") or "your-databricks-token-here"
+    # Get API key from environment or use provided token
+    default_api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY") or "dapi6904c531d301bb5b90df82e2a168c1db"
 
     # Default model configuration
     st.session_state.model_settings = {
-        "model": "Databricks GPT OSS 120B",
-        "endpoint": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
+        "model": "Databricks Llama 3.1 8B",
+        "endpoint": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-meta-llama-3-1-8b-instruct/invocations",
         "temperature": 0.1,
         "max_tokens": 4096,
         "api_key": default_api_key
@@ -708,20 +708,26 @@ def render_settings_page():
                            type="password",
                            help="Enter your Databricks Personal Access Token. You can get this from your Databricks workspace under User Settings > Developer > Access tokens.")
 
+    # Show API key status
+    if api_key and api_key not in ["your-databricks-token-here", "dapi6904c531d301bb5b90df82e2a168c1db"]:
+        if len(api_key) > 20:  # Basic validation
+            st.success("✅ API Token configured")
+        else:
+            st.warning("⚠️ API Token appears to be too short")
+    elif api_key == "dapi6904c531d301bb5b90df82e2a168c1db":
+        st.success("✅ API Token configured (provided)")
+    else:
+        st.warning("⚠️ Please enter your Databricks API Token")
+
     if api_key != st.session_state.model_settings["api_key"]:
         st.session_state.model_settings["api_key"] = api_key
         st.session_state.migration_ai = MigrationAI(api_key=api_key)
         st.success("API key updated successfully!")
 
-    # Model endpoints mapping
-    model_endpoints = {
-        "databricks-meta-llama-3-1-405b-instruct": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
-        "databricks-claude-sonnet-4-5": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
-        "databricks-gemini-2-5-pro": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
-        "databricks-gpt-oss-120b": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
-        "databricks-qwen3-next-80b-a3b-instruct": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
-        "databricks-claude-opus-4-1": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations"
-    }
+    # Model endpoints mapping (same as global MODEL_ENDPOINTS)
+    model_endpoints = MODEL_ENDPOINTS.copy()
+    # Remove non-Databricks models for settings page
+    model_endpoints = {k: v for k, v in model_endpoints.items() if k.startswith("Databricks")}
     
     c1, c2 = st.columns(2)
     
@@ -748,6 +754,41 @@ def render_settings_page():
 
     if st.button("Save Configuration"):
         st.toast("Settings saved successfully!")
+
+    st.markdown("---")
+
+    # Test Connection Section
+    st.markdown("### 🔍 Test API Connection")
+    st.markdown("Verify your API token works with the selected endpoint:")
+
+    if st.button("🧪 Test Connection", type="secondary"):
+        with st.spinner("Testing connection..."):
+            success, message = st.session_state.migration_ai.test_connection()
+
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+
+                # Provide troubleshooting tips
+                with st.expander("🔧 Troubleshooting Tips"):
+                    st.markdown("""
+                    **Common Issues:**
+
+                    1. **401 Unauthorized**: Check your API token is correct and not expired
+                    2. **403 Forbidden**: Your token may not have access to this serving endpoint
+                    3. **Invalid endpoint URL**: Verify the endpoint URL is correct
+
+                    **To get a new token:**
+                    1. Go to your Databricks workspace
+                    2. Click your username → User Settings
+                    3. Developer → Access tokens
+                    4. Generate new token with appropriate permissions
+
+                    **Permissions needed:**
+                    - CAN USE permission on the serving endpoint
+                    - CAN ATTACH TO permission on the cluster (if applicable)
+                    """)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -884,7 +925,7 @@ def render_interactive_conversion():
     # Model and dialect selection
     col1, col2, col3 = st.columns(3)
     with col1:
-        selected_model = st.selectbox("LLM Model", SUPPORTED_MODELS, index=SUPPORTED_MODELS.index("Databricks GPT OSS 120B"), key="interactive_model")
+        selected_model = st.selectbox("LLM Model", SUPPORTED_MODELS, index=SUPPORTED_MODELS.index("Databricks Llama 3.1 8B"), key="interactive_model")
     with col2:
         selected_dialect = st.selectbox("Source Dialect", SUPPORTED_DIALECTS, index=SUPPORTED_DIALECTS.index("Oracle"), key="interactive_dialect")
     with col3:
