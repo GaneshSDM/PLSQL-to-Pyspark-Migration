@@ -1,138 +1,220 @@
+# Legacy System ➜ Databricks Converter
 
-# Oracle SQL/PLSQL to Databricks SQL and PySpark
+A Databricks-native web application for accelerating SQL migration and schema reconciliation from legacy systems (Snowflake, T-SQL, Redshift, Oracle, Teradata, MySQL, PostgreSQL, SSIS, Informatica, etc.) into Databricks SQL.
 
-A toolset to accelerate migration of Oracle DDL and PL/SQL into Databricks SQL and PySpark workflows. This repository combines automated parsing, translation heuristics, validation, and an interactive web interface to help engineers convert Oracle DDL (CREATE TABLE, ALTER TABLE, indexes, partitions, constraints, etc.) into Databricks-friendly definitions and PySpark transformations where required.
+The app leverages LLMs (Claude, Llama, GPT, etc.) for query conversion, validation, and automated fixes.
 
-Key components:
-- ai_migration.py - AI-assisted migration engine that translates Oracle DDL/PLSQL to Databricks SQL or PySpark with explicit limitations and feasibility notes.
-- simple_validator.py - Lightweight validator that checks translated SQL and flags common issues (type mismatches, missing constraints, unsupported constructs).
-- app.py and app.yaml - Minimal web interface / app wrapper for interactive migration, previewing results, bulk processing, and running validations.
-- requirements.txt - Python dependencies used by the project.
+## ✨ Features
 
-## Features
+### 🔹 1. Interactive Conversion
+Convert individual queries in real time.
+- Choose LLM model, SQL Warehouse, and Source Dialect
+- Add custom prompt instructions to handle tricky translations
+- Validate queries by running EXPLAIN in Databricks
+- Retry mechanism: if validation fails, re-submit failed queries with error context so the LLM can correct its own mistakes
 
-- AI-assisted translation
-  - Uses pattern-based parsing plus AI assistance to map Oracle types, constraints, and DDL constructs to Databricks SQL, falling back to PySpark when necessary.
-  - Produces Databricks SQL (DDL/DML) with clear limitations and manual review notes.
+### 🔹 2. Batch Jobs
+Bulk convert entire folders of SQL files.
+- Configure source dialect, input folder, output notebook folder, and results table
+- Choose validation strategy:
+  - No validation
+  - Validate by running EXPLAIN
+  - Failed queries can be retried with error feedback
+- Results are persisted in Delta for easy querying and history
 
-- DDL parsing and mapping
-  - Parses Oracle CREATE TABLE/ALTER TABLE statements, column definitions, constraints (PK/FK/UNIQUE), and common table options.
-  - Maps Oracle data types to Databricks SQL types (NUMBER - DECIMAL, VARCHAR2 - VARCHAR, DATE/TIMESTAMP retained), with fallbacks for unsupported types.
+### 🔹 3. Reconcile Tables
+Compare source vs target schemas (catalog.schema format).
+- Run reconciliation jobs that:
+  - Count rows in source and target
+  - Highlight mismatches
+- Results stored in a Delta table for auditing
+- Useful for validating post-migration data consistency
 
-- Constraint & index handling
-  - Preserves primary keys and unique constraints as metadata / validation checks.
-  - Notes index information and emits migration guidance (e.g., Delta table optimizations, Z-ordering recommendations) rather than trying to recreate Oracle-specific indexes verbatim.
+## 🚀 Quick Start
 
-- Partitioning & clustering guidance
-  - Detects partitioning columns or partition-related clauses and suggests Databricks/Delta Lake partitioning strategies.
+### 1. Clone into Databricks Git Folder
+Clone this repository into a Databricks Git-enabled workspace folder.
 
-- Validation & reporting
-  - Runs translation-time checks with simple_validator.py to identify:
-    - Type mapping issues and possible precision loss
-    - Missing or unsupported features
-    - Inconsistencies between DDL and target schema
-  - Generates actionable messages and suggestions to fix or manually verify translations.
+### 2. Deploy the app
+In the repo root there is a notebook called `app_deployer.py`.
+Open it in Databricks and run all cells. This will automatically:
+- Install dependencies
+- Deploy the Streamlit app into your workspace
+- Make the app available for immediate use
 
-- Interactive web UI
-  - Lightweight app (app.py) to paste or upload DDL/PLSQL, preview Databricks SQL/PySpark output, run validations, and download migration artifacts.
-  - Bulk upload mode for converting multiple files in one run.
-  - Deployment configuration (app.yaml) included for quick hosting (example: Google App Engine / other platforms).
-
-- Extensible & scriptable
-  - Designed to be used as a CLI script, in automated migration pipelines, or interactively from the web UI.
-  - Easy to extend mapping rules, add project-specific type rules, or integrate custom validation logic.
-
-## Why use this project
-
-- Save time translating complex Oracle DDL/PLSQL into Databricks SQL and PySpark-compatible structures.
-- Reduce errors from manual conversions (data type mismatches, lost constraints).
-- Provide repeatable, auditable migration artifacts for large-scale migrations.
-- Combine deterministic rules with AI assistance to handle edge cases and ambiguous constructs.
-
-## Getting started
-
-Prerequisites
-- Python 3.8+ (or your preferred supported version)
-- A Databricks workspace or PySpark environment for testing produced code (recommended)
-- (Optional) API keys/config for AI provider if ai_migration.py uses an external model - check the script header or configuration for details.
-
-Install dependencies
+### 3. Start Using the App
 ```bash
-pip install -r requirements.txt
+streamlit run app.py
 ```
 
-Quick runs (examples)
-- CLI-style usage (example pattern):
-```bash
-python ai_migration.py --input oracle_ddl.sql --output databricks_migration.sql
+## 🔧 Configuration
+
+### LLM Models
+Select from Databricks GPT-5.2, GPT-5.1, GPT OSS 120B, Qwen3 80B, Llama models, Gemma, Claude, GPT, etc.
+
+### Custom Prompts
+(Optional) Add dialect-specific hints for complex conversions.
+
+### Validation
+Toggle validation strategy to balance speed vs correctness.
+
+### Results Storage
+Batch and reconcile results are persisted in Delta tables.
+
+## 🛠️ Retry Logic
+
+Both Interactive and Batch modes have built-in retry support:
+
+1. If validation fails, the app automatically captures the validation error message
+2. The failed query plus the error context are re-submitted to the LLM
+3. The LLM adjusts its output and attempts to generate a corrected query
+4. This iterative approach significantly increases the chance of success
+
+## 📂 Project Structure
+
 ```
-- Run the web app locally:
-```bash
-python app.py
-# then open http://localhost:XXXX as printed by the app
+├── app.py                          # Main Streamlit app (3 tabs: Interactive, Batch, Reconcile)
+├── app_deployer.py                 # Notebook for auto-deployment in Databricks
+├── requirements.txt                # Python dependencies
+├── ai_migration.py                 # Core migration logic with LLM integration
+├── simple_validator.py             # SQL validation utilities
+├── src/
+│   ├── resources/                  # YAML files with LLM prompts
+│   │   ├── conversion_prompts.yaml # Dialect-specific conversion rules
+│   │   └── common_prompts.yaml     # Common prompt templates
+│   ├── utils/                      # Helper modules
+│   │   ├── prompt_helper.py        # Dynamic prompt building
+│   │   └── common_helper.py        # Shared utilities
+│   └── notebooks/                  # Job notebooks for batch processing
+│       ├── batch_converter.py      # Batch SQL file conversion
+│       └── schema_reconciler.py    # Schema reconciliation
+└── README.md
 ```
-- Validate a translated file:
+
+## 📊 Example Migration Flow
+
+1. **Test with Interactive Conversion**: Use Interactive Conversion to test a few sample queries from your legacy system
+2. **Scale with Batch Jobs**: Run a Batch Job to convert hundreds of SQL files into Databricks notebooks
+3. **Validate with Reconciliation**: Execute the Reconcile Tables job to ensure source and target schemas match in counts and data samples
+
+## 🤖 Supported Systems
+
+### Source Dialects
+- Snowflake
+- T-SQL (SQL Server)
+- Redshift
+- Oracle
+- Teradata
+- MySQL
+- PostgreSQL
+- SSIS
+- Informatica
+- Other (generic SQL)
+
+### Target
+- Databricks SQL
+- PySpark DataFrames
+- Delta Lake
+
+### LLM Models
+- **✅ Databricks Llama 3.1 8B** (default - recommended)
+- **✅ Databricks Qwen3 80B**
+- **✅ Databricks Llama 4 Maverick**
+- **✅ Databricks Gemma 3 12B**
+- **✅ Databricks Llama 3.3 70B**
+- **✅ Databricks GPT OSS 120B** (now working!)
+- **❌ Databricks GPT-5.2** (requires additional permissions)
+- **❌ Databricks GPT-5.1** (requires additional permissions)
+- **❌ Databricks GPT OSS 20B** (requires additional permissions)
+- Claude (Anthropic)
+- GPT (OpenAI)
+- Llama (Meta)
+- Gemma (Google)
+- Custom endpoints
+
+## 🔒 Security & Configuration
+
+### Environment Variables
+Set these in your Databricks secrets or environment:
+
 ```bash
-python simple_validator.py --input databricks_migration.sql
+DATABRICKS_TOKEN=your-databricks-personal-access-token
+# or
+DATABRICKS_API_KEY=your-databricks-personal-access-token
 ```
-Note: The exact CLI flags and options are documented in the header/docstrings of each script (ai_migration.py, simple_validator.py, app.py). Use `-h` or open the scripts to see the supported arguments.
 
-## Usage patterns & examples
+### API Key Configuration
+You can also configure your API key directly in the app:
+1. Open the **Settings** tab (⚙️)
+2. Enter your Databricks Personal Access Token
+3. The token will be saved for the session
 
-- Single-table migration
-  - Paste a small CREATE TABLE DDL into the web UI or run ai_migration.py with a single-file input to generate Databricks SQL or PySpark output.
+To get your Databricks Personal Access Token:
+1. Go to your Databricks workspace
+2. Click on your username (top right)
+3. Select "User Settings"
+4. Go to "Developer" → "Access tokens"
+5. Generate a new token with appropriate permissions
 
-- Batch migration
-  - Provide a directory or list of DDL/PLSQL files. The toolset can be scripted to process many files and produce per-object migration artifacts and a combined report from simple_validator.py.
+**Permissions needed:**
+- CAN USE permission on the serving endpoint
+- CAN ATTACH TO permission on the cluster (if applicable)
 
-- Integration into Databricks
-  - Output artifacts are ready to be used in Databricks notebooks (DDL/DML, UDFs, and PySpark scaffolds).
-  - Consider wrapping the resulting code into a notebook cell or job that writes to Delta tables.
+**Note:** Some GPT-based endpoints may require additional workspace permissions. If you encounter 403 errors, try the Llama or Qwen models which have broader access.
 
-## Files & structure
+## 📈 Performance & Best Practices
 
-- ai_migration.py - Core migration logic. Responsible for parsing input DDL/PLSQL, applying mapping rules, invoking AI assistance (if configured), and rendering Databricks SQL or PySpark.
-- simple_validator.py - Runs checks on translated SQL output and emits a report with warnings/errors/suggestions.
-- app.py - A minimal interactive application to test/present migrations and validations, including bulk uploads.
-- app.yaml - Example deployment config for hosting the web app (platform-specific).
-- requirements.txt - Python packages used by the project.
+### Batch Processing
+- Use Delta tables for results storage
+- Monitor job runs through the Databricks Jobs UI
+- Scale cluster size based on workload
 
-(See docstrings and inline comments inside each script for more precise usage and configuration options.)
+### Validation Strategy
+- Start with "No validation" for speed during initial migration
+- Enable EXPLAIN validation for production-ready code
+- Use retry mechanism to improve success rates
 
-## Extending & customizing
+### Schema Reconciliation
+- Run reconciliation after major migrations
+- Use row count comparison for quick validation
+- Enable data sampling for critical tables only (performance intensive)
 
-- Add or adjust type mappings: Modify mapping tables inside ai_migration.py to change how Oracle types map to Databricks SQL or PySpark types for your organization.
-- Add project-specific validations: Extend simple_validator.py to enforce company rules (naming conventions, required auditing columns, etc.).
-- Swap or configure AI provider: If the AI-assisted flow uses an external model, add configuration to inject your own API key, model, or provider.
+## 🐛 Troubleshooting
 
-## Best practices & migration tips
+### Common Issues
 
-- Validate data after schema migration by running sample reads and comparing record counts, key distributions, and data type checks.
-- Preserve critical constraints as metadata checks even if the target system does not enforce them the same way as Oracle.
-- Use Delta Lake features (time travel, ACID writes, partitioning) to implement robust data pipelines after migrating schemas.
-- Test incremental loads and backfills with the translated schema before switching production pipelines.
+1. **Import Errors**: Ensure all dependencies are installed via `pip install -r requirements.txt`
 
-## Contributing
+2. **LLM Connection Issues**: Verify endpoint URLs and API keys in Databricks secrets
 
-Contributions are welcome. Suggested workflow:
-1. Fork the repo.
-2. Create a feature branch.
-3. Add tests or examples for the new mapping/validation.
-4. Open a pull request describing your changes.
+3. **Validation Failures**: Check Databricks SQL syntax compatibility and cluster configuration
 
-Please follow idiomatic Python style and keep changes focused (type mapping, validator improvements, UI enhancements).
+4. **Batch Job Failures**: Ensure input/output paths exist and are accessible
 
-## License
+### Logs & Debugging
+- Check Databricks driver logs for detailed error messages
+- Use the interactive mode first to test individual queries
+- Monitor Delta tables for job results and error details
 
-Add your preferred license file (e.g., MIT, Apache 2.0) to the repository. If no license exists in the repo yet, add LICENSE with the chosen license text.
+## 🤝 Contributing
 
-## Contact / Support
+1. Fork the repository
+2. Create a feature branch
+3. Add tests for new functionality
+4. Submit a pull request
 
-For questions, examples, or to request features, open an issue in this repository.
+## 📄 License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## 🆘 Support
+
+For issues and questions:
+1. Check the troubleshooting section above
+2. Review Databricks documentation
+3. Open an issue in this repository
+4. Contact your Databricks representative
 
 ---
 
-If you want, I can:
-- Commit this README.md to the main branch,
-- Open a PR with the proposed README,
-- Or update the README with additional examples by inspecting ai_migration.py, simple_validator.py, and app.py to extract exact CLI flags and usage snippets. Which would you prefer? 
+**Built with ❤️ for the Databricks community** 

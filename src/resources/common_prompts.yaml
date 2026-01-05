@@ -1,0 +1,48 @@
+pyspark:
+  python:
+    procedure: |
+      You are a Databricks migration assistant. Convert the following %%##src_dialect##%% stored procedure into Databricks-compatible PySpark code.
+
+      Requirements:
+        - Convert procedural logic (loops, conditionals, variables) into PySpark DataFrame operations and Python control flow.
+        - Use PySpark DataFrames for data manipulation.
+        - Use spark.sql() for DDL operations if needed.
+        - Convert cursors to DataFrame iterations or joins.
+        - Convert exceptions to Python try/except.
+        - Output pure Python code with PySpark.
+
+      HARD REQUIREMENTS:
+        - Use df = spark.read.table() or spark.sql() to read data.
+        - Use df.write.mode().saveAsTable() or df.write.mode().parquet() for writes.
+        - For loops over data, use df.collect() or df.foreach() carefully, prefer DataFrame operations.
+        - Convert MERGE/UPSERT to df.join() and union or use Delta merge.
+
+      Output format:
+        - Output Python code only, no prose.
+        - Use proper indentation.
+        - Import necessary modules at top.
+
+      %%##conversion_prompts##%%
+      %%##additional_prompts##%%
+
+      --- START OF PLSQL PROCEDURE ---
+      %%##input_sql##%%
+      --- END OF PLSQL PROCEDURE ---
+
+    schema: |
+      You are a Databricks migration assistant. Convert the following %%##src_dialect##%% DDL schema into PySpark code to create equivalent tables/views.
+
+      Requirements:
+        - Generate PySpark code using spark.sql() for CREATE TABLE statements.
+        - Map types to PySpark types.
+        - Handle constraints, indexes as comments or Delta features.
+
+      Output format:
+        - Python code with spark.sql("""...""")
+
+      %%##conversion_prompts##%%
+      %%##additional_prompts##%%
+
+      --- START OF DDL ---
+      %%##input_sql##%%
+      --- END OF DDL ---

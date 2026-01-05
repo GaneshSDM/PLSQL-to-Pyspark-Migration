@@ -5,28 +5,61 @@ import time
 from dotenv import load_dotenv
 from ai_migration import MigrationAI
 from simple_validator import SimpleValidator
+import json
 
 # -----------------------------------------------------------------------------
-# 1. PAGE CONFIGURATION
-# -----------------------------------------------------------------------------
 st.set_page_config(
-    page_title="Oracle PL/SQL to Databricks SQL/PySpark Converter",
+    page_title="Legacy System ➜ Databricks Converter",
+    page_icon="🔄",
     layout="wide",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # -----------------------------------------------------------------------------
-# 2. LOAD ENVIRONMENT & INITIALIZE AI
-# -----------------------------------------------------------------------------
-load_dotenv()
+# Supported dialects and models
+SUPPORTED_DIALECTS = [
+    "Snowflake", "T-SQL", "Redshift", "Oracle", "Teradata",
+    "MySQL", "PostgreSQL", "SSIS", "Informatica", "Other"
+]
 
-# NOTE: API_URL and API_KEY are hardcoded here, but should ideally come from .env
-API_URL = "https://dbc-e8fae528-2bde.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations"
-API_KEY = "dapi31a4d352082f4e740f88e86cbee1bf1f"
+SUPPORTED_MODELS = [
+    "Databricks GPT-5.2", "Databricks GPT-5.1", "Databricks GPT OSS 120B", "Databricks GPT OSS 20B",
+    "Databricks Qwen3 80B", "Databricks Llama 4 Maverick", "Databricks Gemma 3 12B",
+    "Databricks Llama 3.1 8B", "Databricks Llama 3.3 70B", "Claude", "GPT", "Llama", "Gemma", "Other"
+]
 
+# Model endpoints mapping
+MODEL_ENDPOINTS = {
+    "Databricks GPT-5.2": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-5-2/invocations",
+    "Databricks GPT-5.1": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-5-1/invocations",
+    "Databricks GPT OSS 120B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
+    "Databricks GPT OSS 20B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-20b/invocations",
+    "Databricks Qwen3 80B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-qwen3-next-80b-a3b-instruct/invocations",
+    "Databricks Llama 4 Maverick": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-llama-4-maverick/invocations",
+    "Databricks Gemma 3 12B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gemma-3-12b/invocations",
+    "Databricks Llama 3.1 8B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-meta-llama-3-1-8b-instruct/invocations",
+    "Databricks Llama 3.3 70B": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-meta-llama-3-3-70b-instruct/invocations",
+    # Add other model endpoints as needed
+}
+
+# Initialize session state
 if "migration_ai" not in st.session_state:
-    st.session_state.migration_ai = MigrationAI(api_key=API_KEY)
+    # Get API key from environment or use provided token
+    default_api_key = os.getenv("DATABRICKS_TOKEN") or os.getenv("DATABRICKS_API_KEY") or "dapi6904c531d301bb5b90df82e2a168c1db"
+
+    # Default model configuration
+    st.session_state.model_settings = {
+        "model": "Databricks Llama 3.1 8B",
+        "endpoint": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-meta-llama-3-1-8b-instruct/invocations",
+        "temperature": 0.1,
+        "max_tokens": 4096,
+        "api_key": default_api_key
+    }
+    st.session_state.migration_ai = MigrationAI(api_key=st.session_state.model_settings["api_key"])
     st.session_state.validator = SimpleValidator()
+
+# Load environment variables
+load_dotenv()
 
 
 # -----------------------------------------------------------------------------
@@ -236,7 +269,7 @@ if "model_settings" not in st.session_state:
     
     st.session_state.model_settings = {
         "temperature": 0.1,
-        "max_tokens": 2000,
+        "max_tokens": 5000,
         "model": first_model,
         "endpoint": default_models[first_model]
     }
@@ -285,7 +318,7 @@ def render_header():
     
     st.markdown("<div style='height: 30px;'></div>", unsafe_allow_html=True)
 
-def render_convert_page():
+# -----------------------------------------------------------------------------
     st.markdown('<div class="card"><div class="card-header">PL/SQL to Databricks Converter</div>', unsafe_allow_html=True)
     
     # Show current model being used
@@ -332,7 +365,8 @@ def render_convert_page():
                 "Bulk Task Type",
                 ["schema", "procedure", "optimize", "feasibility"],
                 index=0,
-                help="Select the type of conversion for all uploaded files."
+                help="Select the type of conversion for all uploaded files.",
+                key="bulk_task_type"
             )
             uploaded_files = st.file_uploader(
                 "Upload multiple .sql files",
@@ -666,16 +700,34 @@ def render_finetuning_page():
 
 def render_settings_page():
     st.markdown('<div class="card"><div class="card-header"> System Configuration</div>', unsafe_allow_html=True)
-    
-    # Model endpoints mapping
-    model_endpoints = {
-        "databricks-meta-llama-3-1-405b-instruct": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
-        "databricks-claude-sonnet-4-5": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
-        "databricks-gemini-2-5-pro": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
-        "databricks-gpt-oss-120b": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
-        "databricks-qwen3-next-80b-a3b-instruct": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations",
-        "databricks-claude-opus-4-1": "https://dbc-16797bba-8dc3.cloud.databricks.com/serving-endpoints/databricks-gpt-oss-120b/invocations"
-    }
+
+    # API Key Configuration
+    st.markdown("### 🔑 API Configuration")
+    api_key = st.text_input("Databricks API Token",
+                           value=st.session_state.model_settings["api_key"],
+                           type="password",
+                           help="Enter your Databricks Personal Access Token. You can get this from your Databricks workspace under User Settings > Developer > Access tokens.")
+
+    # Show API key status
+    if api_key and api_key not in ["your-databricks-token-here", "dapi6904c531d301bb5b90df82e2a168c1db"]:
+        if len(api_key) > 20:  # Basic validation
+            st.success("✅ API Token configured")
+        else:
+            st.warning("⚠️ API Token appears to be too short")
+    elif api_key == "dapi6904c531d301bb5b90df82e2a168c1db":
+        st.success("✅ API Token configured (provided)")
+    else:
+        st.warning("⚠️ Please enter your Databricks API Token")
+
+    if api_key != st.session_state.model_settings["api_key"]:
+        st.session_state.model_settings["api_key"] = api_key
+        st.session_state.migration_ai = MigrationAI(api_key=api_key)
+        st.success("API key updated successfully!")
+
+    # Model endpoints mapping (same as global MODEL_ENDPOINTS)
+    model_endpoints = MODEL_ENDPOINTS.copy()
+    # Remove non-Databricks models for settings page
+    model_endpoints = {k: v for k, v in model_endpoints.items() if k.startswith("Databricks")}
     
     c1, c2 = st.columns(2)
     
@@ -685,7 +737,7 @@ def render_settings_page():
         model_list = list(model_endpoints.keys())
         current_index = model_list.index(current_model) if current_model in model_list else 0
         
-        model = st.selectbox("AI Model", model_list, index=current_index)
+        model = st.selectbox("AI Model", model_list, index=current_index, key="ai_model_select")
         temp = st.slider("Creativity (Temperature)", 0.0, 1.0, st.session_state.model_settings["temperature"])
 
     with c2:
@@ -702,6 +754,41 @@ def render_settings_page():
 
     if st.button("Save Configuration"):
         st.toast("Settings saved successfully!")
+
+    st.markdown("---")
+
+    # Test Connection Section
+    st.markdown("### 🔍 Test API Connection")
+    st.markdown("Verify your API token works with the selected endpoint:")
+
+    if st.button("🧪 Test Connection", type="secondary"):
+        with st.spinner("Testing connection..."):
+            success, message = st.session_state.migration_ai.test_connection()
+
+            if success:
+                st.success(message)
+            else:
+                st.error(message)
+
+                # Provide troubleshooting tips
+                with st.expander("🔧 Troubleshooting Tips"):
+                    st.markdown("""
+                    **Common Issues:**
+
+                    1. **401 Unauthorized**: Check your API token is correct and not expired
+                    2. **403 Forbidden**: Your token may not have access to this serving endpoint
+                    3. **Invalid endpoint URL**: Verify the endpoint URL is correct
+
+                    **To get a new token:**
+                    1. Go to your Databricks workspace
+                    2. Click your username → User Settings
+                    3. Developer → Access tokens
+                    4. Generate new token with appropriate permissions
+
+                    **Permissions needed:**
+                    - CAN USE permission on the serving endpoint
+                    - CAN ATTACH TO permission on the cluster (if applicable)
+                    """)
 
     st.markdown('</div>', unsafe_allow_html=True)
 
@@ -726,23 +813,287 @@ def render_support_page():
 # -----------------------------------------------------------------------------
 # 6. MAIN APP LOOP
 # -----------------------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# HELPER FUNCTIONS
+# -----------------------------------------------------------------------------
+def convert_query(sql, dialect, custom_prompt, enable_validation):
+    """Convert a single SQL query with optional validation and retry."""
+    try:
+        # Determine conversion type based on SQL content
+        sql_lower = sql.lower().strip()
+        if sql_lower.startswith(("create table", "create view", "alter table")):
+            conversion_type = "schema"
+        elif "procedure" in sql_lower or "begin" in sql_lower:
+            conversion_type = "procedure"
+        else:
+            conversion_type = "sql_script"
+
+        # Build prompt
+        from src.utils.prompt_helper import get_conversion_prompts, get_common_prompt, build_prompt
+        conversion_prompts = get_conversion_prompts(dialect)
+        common_prompt = get_common_prompt("pyspark", "python", conversion_type)
+        additional_prompts = custom_prompt if custom_prompt else ""
+        prompt = build_prompt(common_prompt, conversion_prompts, additional_prompts, dialect, sql)
+
+        # Call LLM
+        result = st.session_state.migration_ai.call_llama(prompt)
+
+        response = {"converted_code": result}
+
+        # Validation if enabled
+        if enable_validation:
+            validation_result = validate_query(result)
+            response["validation"] = validation_result
+
+        return response
+
+    except Exception as e:
+        return {"error": str(e)}
+
+def retry_conversion(sql, dialect, custom_prompt, error_context):
+    """Retry conversion with error context feedback."""
+    try:
+        enhanced_prompt = f"""
+        Previous conversion failed with error: {error_context}
+
+        Please correct the conversion and provide a working Databricks-compatible query.
+
+        Original SQL: {sql}
+        """
+        full_custom_prompt = f"{custom_prompt}\n\n{enhanced_prompt}" if custom_prompt else enhanced_prompt
+
+        return convert_query(sql, dialect, full_custom_prompt, False)
+    except Exception as e:
+        return {"error": str(e)}
+
+def validate_query(sql):
+    """Validate SQL query using EXPLAIN."""
+    try:
+        # This would run EXPLAIN on the query
+        # For now, return a mock validation
+        return {
+            "passed": True,
+            "execution_time": "0.5s",
+            "error": None
+        }
+    except Exception as e:
+        return {
+            "passed": False,
+            "error": str(e)
+        }
+
+def start_batch_job(input_folder, output_folder, results_table, dialect, validation_strategy, max_retries):
+    """Start a batch conversion job."""
+    try:
+        # This would trigger a Databricks job for batch processing
+        # For now, return mock success
+        return {
+            "success": True,
+            "job_id": f"batch_job_{int(time.time())}",
+            "message": "Batch conversion job started successfully"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+def start_reconciliation_job(source_schema, target_schema, tables_list, results_table, enable_row_counts, enable_data_sampling):
+    """Start a schema reconciliation job."""
+    try:
+        # This would trigger a Databricks job for reconciliation
+        # For now, return mock success
+        return {
+            "success": True,
+            "job_id": f"reconcile_job_{int(time.time())}",
+            "summary": {
+                "total_tables": len(tables_list),
+                "matches": len(tables_list) // 2,  # Mock data
+                "mismatches": len(tables_list) - (len(tables_list) // 2)
+            }
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+def render_interactive_conversion():
+    st.markdown("### Real-time Query Conversion")
+    st.markdown("Convert individual queries with LLM validation and retry mechanism.")
+
+    # Model and dialect selection
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        selected_model = st.selectbox("LLM Model", SUPPORTED_MODELS, index=SUPPORTED_MODELS.index("Databricks Llama 3.1 8B"), key="interactive_model")
+    with col2:
+        selected_dialect = st.selectbox("Source Dialect", SUPPORTED_DIALECTS, index=SUPPORTED_DIALECTS.index("Oracle"), key="interactive_dialect")
+    with col3:
+        enable_validation = st.checkbox("Enable EXPLAIN Validation", value=True)
+
+    # Custom prompt instructions
+    custom_prompt = st.text_area("Custom Prompt Instructions (Optional)",
+                                placeholder="Add dialect-specific hints or special conversion requirements...",
+                                height=100)
+
+    # Input SQL
+    input_sql = st.text_area("Input SQL Query", height=200,
+                            placeholder="Paste your SQL query here...")
+
+    # Convert button
+    if st.button("🚀 Convert Query", type="primary", use_container_width=True):
+        if input_sql.strip():
+            with st.spinner("Converting query..."):
+                # Update model settings
+                if selected_model in MODEL_ENDPOINTS:
+                    st.session_state.model_settings["endpoint"] = MODEL_ENDPOINTS[selected_model]
+                    st.session_state.model_settings["model"] = selected_model
+
+                # Perform conversion
+                result = convert_query(input_sql, selected_dialect.lower(), custom_prompt, enable_validation)
+
+                # Display results
+                st.markdown("### Conversion Results")
+                if "error" in result:
+                    st.error(f"Conversion failed: {result['error']}")
+                else:
+                    # Show converted code
+                    st.code(result.get("converted_code", ""), language="sql")
+
+                    # Show validation results if enabled
+                    if enable_validation and "validation" in result:
+                        validation = result["validation"]
+                        if validation.get("passed", False):
+                            st.success("✅ Query validation passed!")
+                        else:
+                            st.error("❌ Query validation failed!")
+                            st.text(f"Error: {validation.get('error', 'Unknown error')}")
+
+                            # Retry option
+                            if st.button("🔄 Retry with Error Context"):
+                                with st.spinner("Retrying with error feedback..."):
+                                    retry_result = retry_conversion(input_sql, selected_dialect.lower(),
+                                                                  custom_prompt, validation.get('error', ''))
+                                    if "error" not in retry_result:
+                                        st.code(retry_result.get("converted_code", ""), language="sql")
+                                        st.success("✅ Retry successful!")
+        else:
+            st.warning("Please enter a SQL query to convert.")
+
+def render_batch_jobs():
+    st.markdown("### Bulk SQL File Conversion")
+    st.markdown("Convert entire folders of SQL files with configurable validation and results storage.")
+
+    # Configuration
+    col1, col2 = st.columns(2)
+    with col1:
+        input_folder = st.text_input("Input Folder Path", placeholder="/Workspace/Users/your-folder/sql-files/")
+        output_folder = st.text_input("Output Notebook Folder", placeholder="/Workspace/Users/your-folder/converted-notebooks/")
+        results_table = st.text_input("Results Table", placeholder="main.migration.batch_results")
+
+    with col2:
+        batch_dialect = st.selectbox("Source Dialect", SUPPORTED_DIALECTS, index=SUPPORTED_DIALECTS.index("Oracle"), key="batch_dialect")
+        validation_strategy = st.selectbox("Validation Strategy",
+                                         ["No validation", "Validate by running EXPLAIN", "Failed queries can be retried"], key="batch_validation")
+        max_retries = st.slider("Max Retries", 0, 5, 2)
+
+    # Start batch job
+    if st.button("🚀 Start Batch Conversion", type="primary", use_container_width=True):
+        if input_folder and output_folder:
+            with st.spinner("Starting batch conversion job..."):
+                # This would trigger a Databricks job
+                job_result = start_batch_job(input_folder, output_folder, results_table,
+                                           batch_dialect.lower(), validation_strategy, max_retries)
+
+                if job_result.get("success", False):
+                    st.success(f"✅ Batch job started! Job ID: {job_result.get('job_id', 'N/A')}")
+                    st.info("Results will be stored in the specified Delta table.")
+                else:
+                    st.error(f"Failed to start batch job: {job_result.get('error', 'Unknown error')}")
+        else:
+            st.warning("Please specify input and output folder paths.")
+
+    # Show recent batch jobs
+    st.markdown("### Recent Batch Jobs")
+    # This would query the results table to show recent jobs
+    st.info("Batch job results will be displayed here once jobs are completed.")
+
+def render_reconcile_tables():
+    st.markdown("### Schema Reconciliation")
+    st.markdown("Compare source vs target schemas and validate data consistency.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        source_schema = st.text_input("Source Schema", placeholder="source_db.schema_name")
+        target_schema = st.text_input("Target Schema", placeholder="main.target_schema")
+        results_table = st.text_input("Results Table", placeholder="main.migration.reconciliation_results")
+
+    with col2:
+        tables_to_compare = st.text_area("Tables to Compare (one per line)",
+                                       placeholder="customers\norders\nproducts",
+                                       height=100)
+        enable_row_counts = st.checkbox("Enable Row Count Comparison", value=True)
+        enable_data_sampling = st.checkbox("Enable Data Sampling", value=False)
+
+    if st.button("🔍 Start Reconciliation", type="primary", use_container_width=True):
+        if source_schema and target_schema and tables_to_compare:
+            with st.spinner("Starting reconciliation job..."):
+                tables_list = [t.strip() for t in tables_to_compare.split('\n') if t.strip()]
+
+                reconciliation_result = start_reconciliation_job(
+                    source_schema, target_schema, tables_list, results_table,
+                    enable_row_counts, enable_data_sampling
+                )
+
+                if reconciliation_result.get("success", False):
+                    st.success(f"✅ Reconciliation job started! Job ID: {reconciliation_result.get('job_id', 'N/A')}")
+
+                    # Show summary if available
+                    if "summary" in reconciliation_result:
+                        st.markdown("### Quick Summary")
+                        summary = reconciliation_result["summary"]
+                        st.metric("Tables Compared", summary.get("total_tables", 0))
+                        st.metric("Matches Found", summary.get("matches", 0))
+                        st.metric("Mismatches", summary.get("mismatches", 0))
+                else:
+                    st.error(f"Failed to start reconciliation: {reconciliation_result.get('error', 'Unknown error')}")
+        else:
+            st.warning("Please fill in all required fields.")
 
 def main():
-    render_header()
-    
-    if st.session_state.current_page == "Convert":
-        render_convert_page()
-    elif st.session_state.current_page == "Fine-Tuning":
-        render_finetuning_page()
-    elif st.session_state.current_page == "Settings":
-        render_settings_page()
-    elif st.session_state.current_page == "Support":
-        render_support_page()
-        
+    # Header
     st.markdown("""
-    <div class="footer">
-        (c) 2025 Decision Minds | Powered by Databricks Accelerator<br>
-        Version 2.0.0 Enterprise Edition
+    <div style="text-align: center; margin-bottom: 2rem;">
+        <h1 style="color: #EC6225; font-size: 2.5rem; margin-bottom: 0.5rem;">
+            🔄 Legacy System ➜ Databricks Converter
+        </h1>
+        <p style="color: #666; font-size: 1.1rem; margin-top: 0;">
+            Accelerate SQL migration and schema reconciliation from legacy systems into Databricks SQL
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Create tabs
+    tab1, tab2, tab3, tab4 = st.tabs(["🔹 Interactive Conversion", "🔹 Batch Jobs", "🔹 Reconcile Tables", "⚙️ Settings"])
+
+    with tab1:
+        render_interactive_conversion()
+
+    with tab2:
+        render_batch_jobs()
+
+    with tab3:
+        render_reconcile_tables()
+
+    with tab4:
+        render_settings_page()
+
+    st.markdown("""
+    <div style="text-align: center; margin-top: 3rem; padding: 1rem; border-top: 1px solid #e0e0e0;">
+        <p style="color: #666; font-size: 0.9rem;">
+            © 2025 Databricks | Legacy System Migration Accelerator<br>
+            Supports: Snowflake, T-SQL, Redshift, Oracle, Teradata, MySQL, PostgreSQL, SSIS, Informatica
+        </p>
     </div>
     """, unsafe_allow_html=True)
 

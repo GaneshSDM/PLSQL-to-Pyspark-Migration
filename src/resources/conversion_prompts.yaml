@@ -1,0 +1,73 @@
+oracle:
+  functions:
+    NVL: coalesce
+    SYSDATE: current_timestamp()
+    TO_CHAR: cast(... as string)
+    TO_DATE: to_date
+    SUBSTR: substring
+    LENGTH: length
+    UPPER: upper
+    LOWER: lower
+    ROUND: round
+    TRUNC: trunc
+    MOD: mod
+    ABS: abs
+    SQRT: sqrt
+    POWER: pow
+    CONCAT: concat
+    INSTR: instr
+    REPLACE: replace
+    TRIM: trim
+    LTRIM: ltrim
+    RTRIM: rtrim
+    LPAD: lpad
+    RPAD: rpad
+    DECODE: case when ... then ... else ... end
+    CASE: case when ... then ... else ... end
+    COALESCE: coalesce
+    NULLIF: nullif
+    GREATEST: greatest
+    LEAST: least
+    ROW_NUMBER: row_number()
+    RANK: rank()
+    DENSE_RANK: dense_rank()
+    LEAD: lead
+    LAG: lag
+    SUM: sum
+    AVG: avg
+    COUNT: count
+    MIN: min
+    MAX: max
+    STDDEV: stddev
+    VARIANCE: variance
+  types:
+    VARCHAR2: StringType()
+    NVARCHAR2: StringType()
+    CHAR: StringType()
+    NCHAR: StringType()
+    NUMBER: DecimalType() or LongType()
+    INTEGER: IntegerType()
+    INT: IntegerType()
+    SMALLINT: ShortType()
+    BIGINT: LongType()
+    FLOAT: FloatType()
+    DOUBLE: DoubleType()
+    DATE: DateType()
+    TIMESTAMP: TimestampType()
+    CLOB: StringType()
+    BLOB: BinaryType()
+  procedures:
+    - Convert BEGIN...END blocks to PySpark DataFrame operations or functions
+    - Convert FOR loops to DataFrame iterations or explode
+    - Convert IF statements to conditional expressions
+    - Convert CURSOR loops to DataFrame joins or aggregations
+    - Convert EXCEPTION handling to try/except in Python
+  ddl:
+    CREATE TABLE: df.write.mode("overwrite").saveAsTable or spark.sql("CREATE TABLE...")
+    INSERT INTO: df.write.mode("append").saveAsTable or union
+    UPDATE: merge or overwrite partitions
+    DELETE: filter and overwrite
+    MERGE: df.merge or spark.sql("MERGE...")
+  comments:
+    - Convert -- comments to # comments in Python
+    - Convert /* */ comments to """ """ in Python

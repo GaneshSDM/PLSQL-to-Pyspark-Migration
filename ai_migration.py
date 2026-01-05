@@ -5,6 +5,8 @@ import time
 import logging
 import ast
 import streamlit as st
+from src.utils.prompt_helper import get_conversion_prompts, get_common_prompt, build_prompt
+from src.utils.common_helper import get_model_params, classify_sql
 
 # Configure Enterprise Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -21,40 +23,125 @@ class MigrationAI:
         api_url = settings["endpoint"]
         temperature = settings["temperature"]
         max_tokens = settings["max_tokens"]
-        
-        headers = {
-            "Authorization": f"Bearer {self.api_key}",
-            "Content-Type": "application/json"
-        }
+
+        # Try different authentication methods for Databricks endpoints
+        auth_methods = [
+            {"Authorization": f"Bearer {self.api_key}"},  # Standard Bearer token
+            {"Authentication": f"Bearer {self.api_key}"},  # Alternative header name
+            {"Authorization": f"Token {self.api_key}"},    # Token auth
+        ]
+
+        headers_base = {"Content-Type": "application/json"}
 
         payload = {
             "messages": [{"role": "user", "content": prompt}],
             "max_tokens": max_tokens,
             "temperature": temperature
         }
+
         retries = 3
         for attempt in range(retries):
+            for auth_idx, auth_header in enumerate(auth_methods):
+                try:
+                    headers = {**headers_base, **auth_header}
+                    logger.info(f"Sending request to {settings['model']} (Attempt {attempt + 1}/{retries}, Auth method {auth_idx + 1})...")
+                    logger.info(f"Endpoint: {api_url}")
+
+                    response = requests.post(api_url, json=payload, headers=headers, timeout=30)
+                    response.raise_for_status()
+
+                    data = response.json()
+                    raw_content = data["choices"][0]["message"]["content"]
+
+                    # Handle new format where content is a list
+                    if isinstance(raw_content, list):
+                        text_content = ""
+                        for item in raw_content:
+                            if isinstance(item, dict) and item.get("type") == "text":
+                                text_content += item.get("text", "")
+                        return self._clean_model_output(text_content)
+                    else:
+                        return self._clean_model_output(raw_content)
+
+                except requests.exceptions.HTTPError as e:
+                    if response.status_code == 401:
+                        logger.warning(f"Auth method {auth_idx + 1} failed with 401: {auth_header}")
+                        if auth_idx == len(auth_methods) - 1:  # Last auth method
+                            continue  # Try next attempt
+                        else:
+                            continue  # Try next auth method
+                    elif response.status_code == 403:
+                        logger.warning(f"Auth method {auth_idx + 1} failed with 403 (Forbidden): {auth_header}")
+                        if auth_idx == len(auth_methods) - 1:
+                            continue
+                        else:
+                            continue
+                    else:
+                        logger.error(f"HTTP {response.status_code} error: {response.text}")
+                        if attempt == retries - 1:
+                            return f"HTTP {response.status_code} Error: {response.text}"
+                        break  # Don't try other auth methods for non-auth errors
+
+                except Exception as e:
+                    logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                    if attempt == retries - 1:
+                        return f"Error after {retries} attempts: {str(e)}"
+                    break  # Don't retry for non-HTTP errors
+
+            time.sleep(2 ** attempt)  # Exponential backoff between attempts
+
+    def test_connection(self, endpoint_url=None, api_key=None):
+        """Test the connection to a Databricks serving endpoint"""
+        if endpoint_url is None:
+            endpoint_url = st.session_state.model_settings["endpoint"]
+        if api_key is None:
+            api_key = self.api_key
+
+        test_prompt = "Hello, please respond with 'Connection successful' if you can read this message."
+
+        # Try different authentication methods
+        auth_methods = [
+            {"Authorization": f"Bearer {api_key}"},
+            {"Authentication": f"Bearer {api_key}"},
+            {"Authorization": f"Token {api_key}"},
+        ]
+
+        headers_base = {"Content-Type": "application/json"}
+        payload = {
+            "messages": [{"role": "user", "content": test_prompt}],
+            "max_tokens": 50,
+            "temperature": 0.1
+        }
+
+        for auth_idx, auth_header in enumerate(auth_methods):
             try:
-                logger.info(f"Sending request to {settings['model']} (Attempt {attempt + 1}/{retries})...")
-                response = requests.post(api_url, json=payload, headers=headers)
+                headers = {**headers_base, **auth_header}
+                logger.info(f"Testing connection with auth method {auth_idx + 1}: {list(auth_header.keys())[0]}")
+
+                response = requests.post(endpoint_url, json=payload, headers=headers, timeout=10)
                 response.raise_for_status()
+
                 data = response.json()
-                raw_content = data["choices"][0]["message"]["content"]
-                
-                # Handle new format where content is a list
-                if isinstance(raw_content, list):
-                    text_content = ""
-                    for item in raw_content:
-                        if isinstance(item, dict) and item.get("type") == "text":
-                            text_content += item.get("text", "")
-                    return self._clean_model_output(text_content)
+                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+
+                if "successful" in content.lower():
+                    return True, f"✅ Connection successful with auth method {auth_idx + 1}"
                 else:
-                    return self._clean_model_output(raw_content)
+                    return True, f"✅ Endpoint responded, but unexpected response: {content[:100]}..."
+
+            except requests.exceptions.HTTPError as e:
+                if response.status_code == 401:
+                    continue  # Try next auth method
+                elif response.status_code == 403:
+                    return False, f"❌ 403 Forbidden: Check if your API token has access to this endpoint"
+                else:
+                    return False, f"❌ HTTP {response.status_code}: {response.text[:200]}"
+            except requests.exceptions.Timeout:
+                return False, "❌ Connection timeout: Endpoint may be unavailable"
             except Exception as e:
-                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
-                if attempt == retries - 1:
-                    return f"Error after {retries} attempts: {str(e)}"
-                time.sleep(2 ** attempt)  # Exponential backoff
+                return False, f"❌ Connection error: {str(e)}"
+
+        return False, "❌ All authentication methods failed. Check your API token and endpoint URL."
 
     def _clean_model_output(self, content):
         """Parses and cleans the model output if it contains structured reasoning traces."""
@@ -89,79 +176,14 @@ class MigrationAI:
         if len(oracle_sql) > 8000:  # Characters threshold for chunking
             return self._process_large_sql(oracle_sql, **kwargs)
             
-        prompt = f"""
-Act as an expert SQL-to-Databricks migration specialist with deep knowledge of constraint validation, schema emulation, and Delta Lake optimization. Your goal is to convert Oracle SQL DDL to Databricks SQL with 100% precision, ensuring the output matches strict schema requirements over default Spark behaviors.
+        src_dialect = "oracle"
+        conversion_prompts = get_conversion_prompts(src_dialect)
+        common_prompt = get_common_prompt("pyspark", "python", "schema")
+        additional_prompts = ""  # Can add if needed
+        prompt = build_prompt(common_prompt, conversion_prompts, additional_prompts, src_dialect, oracle_sql)
+        
+        return self.call_llama(prompt)
 
-### CORE REQUIREMENTS:
-==================
-
-1. ### CONSTRAINT VALIDATION & STRUCTURE
-    * **CONSTRAINT PLACEMENT:** Define `PRIMARY KEY`, `UNIQUE`, and `FOREIGN KEY` constraints as **Table-Level Constraints** at the end of the column list, before the closing parenthesis.
-    * **CONSTRAINT SYNTAX:** Use the format: `CONSTRAINT PK_[COLUMN_NAME] PRIMARY KEY (column_name)`.
-    * **NULLABILITY:** Columns intended for Primary Keys or Unique constraints MUST be explicitly defined with `NOT NULL` in the column list.
-    * **NO ENFORCEMENT:** Do NOT include the `ENFORCED` or `NOT ENFORCED` keywords.
-    * **STORAGE CLAUSE:** Every `CREATE TABLE` statement must end with the clause **`USING DELTA;`**.
-    * **CLEAN DDL:** Do NOT use `ALTER TABLE` statements or `TBLPROPERTIES` for constraints or defaults unless the source contains complex logic that cannot be handled inline.
-
-2. ### DATA TYPE MAPPING (STRICT)
-    * **NUMBER(p, s)** -> **DECIMAL(p, s)** (Mandatory: Do NOT use INT or BIGINT).
-    * **VARCHAR2(n BYTE/CHAR)** -> **VARCHAR(n)** (Mandatory: Do NOT use STRING).
-    * **CHAR(n BYTE/CHAR)** -> **CHAR(n)** (Mandatory: Do NOT use STRING).
-    * **DATE / TIMESTAMP** -> **DATE / TIMESTAMP** (Maintain as is).
-    * **CLOB / LONG / BLOB** -> **STRING**.
-
-3. ### CONVERSION STRATEGY HIERARCHY
-    * **Priority A (SQL-to-SQL):** Maintain a single-block `CREATE TABLE` structure whenever possible.
-    * **Priority B (Inlining):** Keep `DEFAULT` values and `NOT NULL` constraints inline within column definitions.
-    * **Priority C (Cleanup):** Strip Oracle-specific storage parameters (e.g., `TABLESPACE`, `PCTFREE`, `STORAGE`, `LOGGING`).
-
-4. ### CODE REVIEW & QA
-    * HIGHLIGHT uncertain conversions with `/* REVIEW REQUIRED */`.
-    * Ensure no trailing commas before the closing parenthesis of the table.
-    * Maintain the exact casing and naming conventions from the Oracle source.
-
----
-
-### CONVERSION DECISION MATRIX:
-==========================
-IF (Source contains DDL for Tables/Indexes/Keys) THEN
-  -> Apply Strict Type Mapping (NUMBER to DECIMAL, VARCHAR2 to VARCHAR).
-  -> Move PK/FK to Table-Level Constraints.
-  -> Append 'USING DELTA;'.
-ELSE IF (Source contains PL/SQL Procedural Logic) THEN
-  -> Use Databricks SQL-compatible syntax.
-  -> Document logic changes in the Mapping Summary.
-
----
-
-### OUTPUT REQUIREMENTS:
-===================
-For each conversion, provide:
-1. **Converted Code:** The Databricks SQL in a single markdown block (```sql ... ```).
-2. **Mapping Summary:** A brief list of specific type and constraint changes.
-3. **Confidence Level:** HIGH/MEDIUM/LOW based on syntax complexity.
-4. **Limitations and Manual Review:** Items that require redesign, validation, or non-automated handling.
-
----
-
-### EXECUTION COMMAND:
-=================
-"Apply this production migration pipeline to the provided Oracle SQL. Strictly map NUMBER to DECIMAL and VARCHAR2 to VARCHAR. Move Primary Keys to table-level constraints and terminate the statement with 'USING DELTA;'. Do not provide external ALTER TABLE statements."
-
-**Input (Oracle):**
-[INSERT ORACLE SQL HERE]
-
-**Output Format:**
-1. Provide the **pysql** code in a single markdown block (```sql ... ```).
-2. After the code block, provide a section titled "### Changes and Enhancements" where you list the specific changes made, optimizations applied, and any reasoning.
-3. Add a section titled "### Limitations and Manual Review" that lists any items needing redesign or validation.
-
-**Input (Oracle):**
-
-{oracle_sql}
-
-**Output (Databricks):**
-"""
         return self.call_llama(prompt)
 
     def _process_large_sql(self, oracle_sql, **kwargs):
@@ -215,183 +237,12 @@ For each conversion, provide:
         return f"```sql\n{combined_sql}```\n\n{combined_changes}\n{combined_limitations}"
 
     def migrate_procedure(self, oracle_procedure, **kwargs):
-        prompt = f"""
-You are an expert Oracle-to-Databricks SQL migration specialist. Your priority is accurate SQL-to-SQL conversion, strict data type preservation, constraint correctness, and production-grade migration output.
-
-Your output MUST follow the rules below with zero exceptions.
-
-====================================================
-SECTION 1  CRITICAL CONSTRAINT RULES (STRICT)
-==============================================
-
-These rules override all others. Follow exactly.
-
-1. UNIQUE CONSTRAINTS
-
-    * Databricks does NOT enforce UNIQUE constraints unless manually enabled.
-    * REMOVE all UNIQUE constraints from DDL.
-    * Add comment: "UNIQUE removed  unsupported unless enabled".
-    * If uniqueness required: recommend NOT NULL + CHECK or ETL-layer logic.
-
-2. PRIMARY KEY CONSTRAINTS
-
-    * Databricks treats PRIMARY KEY as INFORMATIONAL ONLY.
-    * Keep PK as COMMENT-style metadata only.
-    * **DO NOT generate enforced PK constraints.**
-    * **If enforcement required: replace with NOT NULL + CHECK.** (Reinforcement of the new requirement)
-
-3. FOREIGN KEYS
-
-    * Databricks does NOT enforce FK constraints.
-    * Convert all foreign keys to COMMENT-only definitions.
-    * Document that RI must be handled externally.
-
-4. CHECK CONSTRAINTS
-
-    * Databricks supports only simple CHECK conditions.
-    * Validate each CHECK for compatibility.
-    * If unsupported  convert to COMMENT +
-      `/* REVIEW REQUIRED: CHECK constraint not supported */`.
-    * **CRITICAL PLACEMENT RULE: CHECK constraints must be added via `ALTER TABLE ADD CONSTRAINT` after the table is created. DO NOT include them in the `CREATE TABLE` statement.** (New requirement added)
-
-5. REVIEW MARKERS
-
-    * If ANY constraint conversion is uncertain:
-      `/* REVIEW REQUIRED: Constraint unclear */`.
-
-6. OUTPUT FORMAT FOR CONSTRAINTS
-    Each constraint conversion MUST show:
-    /* ORIGINAL: <Oracle constraint>
-    */
-    /* NOTES:
-    - <explanation of replacements/removals>
-    */
-
-====================================================
-SECTION 2  DATA TYPE RULES (STRICT)
-====================================
-
-1. WIDTH, PRECISION, SCALE
-
-    * **Oracle datatype sizes MUST be preserved exactly where possible, matching the Databricks SQL type size.** (Refined for emphasis)
-    * NUMBER(p,s), VARCHAR2(n), CHAR(n), DATE, TIMESTAMP must retain identical structure in Databricks.
-
-2. STRING vs VARCHAR
-
-    * DEFAULT: Use VARCHAR, not STRING.
-    * STRING allowed ONLY if VARCHAR cannot represent the source length.
-    * ALWAYS provide justification when using STRING.
-
-3. DATE DEFAULTS
-
-    * **DATE column default MUST be `CURRENT_DATE`.** (Emphasized new requirement)
-    * **NEVER use `CURRENT_TIMESTAMP` for DATE fields, as it returns a TIMESTAMP type.** (Emphasized new requirement)
-
-4. BINARY, BLOB, CLOB
-
-    * Convert using Databricks-supported binary types.
-    * Document performance considerations.
-
-====================================================
-SECTION 3  CONVERSION STRATEGY PRIORITY
-========================================
-
-1. SQL-to-SQL (>= 90% compatibility)
-
-    * MUST prefer SQL-to-SQL conversion.
-    * Keep logic identical unless required by platform differences.
-
-2. Hybrid SQL + Python (7089% SQL compatibility)
-
-    * Allowed ONLY when SQL cannot cover entire logic.
-    * Python  10% of logic.
-    * MUST document why Python was required.
-
-3. PySpark (< 70% SQL compatibility)
-
-    * Use only as LAST resort.
-    * Maintain SQL-like readability.
-    * Add detailed migration notes.
-
-====================================================
-SECTION 4  TESTING SEQUENCE (MANDATORY)
-========================================
-
-Perform conversions in the following order:
-Phase 1: DDL (tables, indexes, constraints)
-Phase 2: CTE-heavy queries (nested queries, WITH clauses)
-Phase 3: Stored procedures (loops, conditions, business logic)
-Phase 4: Packages (dependencies, cross-references)
-
-====================================================
-SECTION 5  REQUIRED OUTPUT FORMAT
-==================================
-
-You MUST output:
-
-1. Original Oracle code (commented out).
-2. Converted Databricks code (including separate `ALTER TABLE` for CHECK constraints).
-3. Confidence Level: HIGH / MEDIUM / LOW.
-4. `/* REVIEW REQUIRED */` marking unclear areas.
-5. Detailed datatype justification.
-6. Detailed constraint explanation.
-7. Test steps for validating conversion.
-8. Performance considerations.
-9. Deployment checklist items (DDL, data types, constraints, indexes).
-10. Limitations and Manual Review notes for non-convertible or redesign-required items.
-11. Automation Feasibility rating: HIGH / MEDIUM / LOW.
-
-====================================================
-SECTION 6  STRESS TEST REQUIREMENTS
-====================================
-
-You MUST ensure conversion supports:
-
-* BLOB/CLOB handling
-* 1000+ line JOIN operations
-* Deep nested subqueries
-* Multi-level CTEs
-* Complex OUTER JOIN patterns
-* Multi-package dependencies
-
-====================================================
-SECTION 7  FOLDER STRUCTURE REQUIREMENTS
-=========================================
-
-source-scripts/        Original Oracle SQL
-converted-code/        Databricks SQL with review flags
-test-results/          Execution and validation logs
-documentation/         Mapping decisions & constraint notes
-stress-tests/          Large query & BLOB cases
-
-====================================================
-SECTION 8  SUCCESS METRICS
-===========================
-
-* 100% constraint accuracy
-* Oracle datatype sizes preserved
-* Minimal STRING usage
-* Review flags only in uncertain cases
-* All phases tested
-* Stress tests passed
-* Full documentation completed
-
-====================================================
-FINAL EXECUTION COMMAND
-=======================
-
-"Apply this entire migration pipeline to convert [SOURCE_DATABASE] to Databricks. Preserve datatypes exactly, enforce VARCHAR over STRING, use CURRENT_DATE for DATE defaults, remove UNIQUE constraints, convert PK/FK to informational comments, enforce constraints using NOT NULL + CHECK where needed, ensure **CHECK constraints are added via separate ALTER TABLE statements**, follow SQL-first strategy, and output all required documentation and testing steps."
-**Output Format:**
-1. Provide the **Databricks SQL** code in a single markdown block (```sql ... ```).
-2. After the code block, provide a section titled "### Changes and Enhancements" where you list the specific changes made, optimizations applied, and any reasoning.
-3. Provide a section titled "### Limitations and Manual Review".
-4. Provide "### Automation Feasibility" with HIGH/MEDIUM/LOW.
-
-**Input (Oracle):**
-{oracle_procedure}
-
-**Output (Databricks):**
-"""
+        src_dialect = "oracle"
+        conversion_prompts = get_conversion_prompts(src_dialect)
+        common_prompt = get_common_prompt("pyspark", "python", "procedure")
+        additional_prompts = ""  # Can add if needed
+        prompt = build_prompt(common_prompt, conversion_prompts, additional_prompts, src_dialect, oracle_procedure)
+        
         return self.call_llama(prompt, **kwargs)
 
     def optimize_query(self, sql_query, **kwargs):
