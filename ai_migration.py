@@ -40,6 +40,9 @@ class MigrationAI:
         }
 
         retries = 3
+        saw_auth_error = False
+        last_auth_status = None
+        last_auth_body = None
         for attempt in range(retries):
             for auth_idx, auth_header in enumerate(auth_methods):
                 try:
@@ -64,18 +67,22 @@ class MigrationAI:
                         return self._clean_model_output(raw_content)
 
                 except requests.exceptions.HTTPError as e:
-                    if response.status_code == 401:
+                    status_code = getattr(getattr(e, "response", None), "status_code", None)
+                    if status_code is None:
+                        status_code = getattr(response, "status_code", None)
+
+                    if status_code == 401:
+                        saw_auth_error = True
+                        last_auth_status = 401
+                        last_auth_body = getattr(response, "text", None)
                         logger.warning(f"Auth method {auth_idx + 1} failed with 401: {auth_header}")
-                        if auth_idx == len(auth_methods) - 1:  # Last auth method
-                            continue  # Try next attempt
-                        else:
-                            continue  # Try next auth method
-                    elif response.status_code == 403:
+                        continue  # Try next auth method / attempt
+                    elif status_code == 403:
+                        saw_auth_error = True
+                        last_auth_status = 403
+                        last_auth_body = getattr(response, "text", None)
                         logger.warning(f"Auth method {auth_idx + 1} failed with 403 (Forbidden): {auth_header}")
-                        if auth_idx == len(auth_methods) - 1:
-                            continue
-                        else:
-                            continue
+                        continue  # Try next auth method / attempt
                     else:
                         logger.error(f"HTTP {response.status_code} error: {response.text}")
                         if attempt == retries - 1:
@@ -89,6 +96,15 @@ class MigrationAI:
                     break  # Don't retry for non-HTTP errors
 
             time.sleep(2 ** attempt)  # Exponential backoff between attempts
+
+        # If we reach here, all retries were exhausted without a return. Ensure we never return None.
+        if saw_auth_error and last_auth_status in (401, 403):
+            details = f" {last_auth_body}" if last_auth_body else ""
+            return (
+                f"Authentication failed (HTTP {last_auth_status}) after {retries} attempts. "
+                f"Check your API token and endpoint permissions.{details}"
+            )
+        return f"Error after {retries} attempts: request failed without a successful response."
 
     def test_connection(self, endpoint_url=None, api_key=None):
         """Test the connection to a Databricks serving endpoint"""
